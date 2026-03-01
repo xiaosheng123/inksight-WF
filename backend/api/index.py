@@ -14,9 +14,40 @@ from typing import Optional
 from dotenv import load_dotenv
 from fastapi import FastAPI, Query, Request, Response, Depends, Header
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
-from slowapi.errors import RateLimitExceeded
+
+# slowapi (rate limiting) is optional at runtime. In environments where it is
+# not installed, we fall back to lightweight no-op shims so the API can still
+# start normally (just without rate limiting).
+try:  # pragma: no cover - exercised implicitly at import time
+    from slowapi import Limiter, _rate_limit_exceeded_handler
+    from slowapi.util import get_remote_address
+    from slowapi.errors import RateLimitExceeded
+except ImportError:  # pragma: no cover
+    class _DummyLimiter:
+        def __init__(self, *args, **kwargs):
+            """Dummy limiter that accepts any arguments but does nothing."""
+            pass
+        
+        def limit(self, *args, **kwargs):
+            def decorator(func):
+                return func
+            return decorator
+
+    def get_remote_address(request: Request) -> str:
+        client = getattr(request, "client", None)
+        return getattr(client, "host", "unknown") if client else "unknown"
+
+    class RateLimitExceeded(Exception):
+        """Fallback rate limit exception (never actually raised without slowapi)."""
+
+    async def _rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
+        return JSONResponse(
+            status_code=429,
+            content={"error": "rate_limit_unavailable", "message": "Rate limiting is not enabled on this server."},
+        )
+
+    Limiter = _DummyLimiter  # type: ignore
+
 import httpx
 from PIL import Image
 from PIL import ImageDraw
@@ -75,6 +106,7 @@ from core.stats_store import (
     get_latest_render_content,
     check_habit,
     get_habit_status,
+    delete_habit,
 )
 from core.auth import validate_mac_param, require_device_token, require_admin
 
@@ -523,6 +555,16 @@ async def render(
         img, resolved_persona, cache_hit = await _build_image(
             v, mac, persona, rssi, screen_w=w, screen_h=h, force_next=force_next,
         )
+        # 确保返回给固件的图像尺寸严格等于设备请求的 w×h。
+        # 如果某个模式或配置导致渲染尺寸与固件编译时的分辨率不一致，
+        # 固件在按固定字节数读取 BMP 时就会出现 "Failed to read row" -> Server error。
+        if img.size != (w, h):
+            logger.warning(
+                f"[RENDER] Image size mismatch for {mac}:{resolved_persona}: "
+                f"got {img.size[0]}x{img.size[1]}, expected {w}x{h}. Resizing to match."
+            )
+            img = img.resize((w, h), Image.NEAREST)
+
         bmp_bytes = image_to_bmp_bytes(img)
         elapsed = time.time() - start_time
         elapsed_ms = int(elapsed * 1000)
@@ -654,6 +696,8 @@ async def get_config(mac: str, x_device_token: Optional[str] = Header(default=No
     config = await get_active_config(mac)
     if not config:
         return JSONResponse({"error": "no config found"}, status_code=404)
+    # Strip encrypted key from API response (keep has_api_key flag)
+    config.pop("llm_api_key", None)
     return config
 
 
@@ -661,6 +705,9 @@ async def get_config(mac: str, x_device_token: Optional[str] = Header(default=No
 async def get_config_hist(mac: str, x_device_token: Optional[str] = Header(default=None)):
     await require_device_token(mac, x_device_token)
     history = await get_config_history(mac)
+    # Strip encrypted keys from API response
+    for cfg in history:
+        cfg.pop("llm_api_key", None)
     return {"mac": mac, "configs": history}
 
 
@@ -1068,6 +1115,16 @@ async def habit_status(mac: str, x_device_token: Optional[str] = Header(default=
     await require_device_token(mac, x_device_token)
     habits = await get_habit_status(mac)
     return {"mac": mac, "habits": habits}
+
+
+@app.delete("/api/device/{mac}/habit/{habit_name}")
+async def habit_delete(mac: str, habit_name: str, x_device_token: Optional[str] = Header(default=None)):
+    """Delete a habit and all its records."""
+    await require_device_token(mac, x_device_token)
+    deleted = await delete_habit(mac, habit_name)
+    if not deleted:
+        return JSONResponse({"error": "Habit not found"}, status_code=404)
+    return {"ok": True, "message": f"Habit '{habit_name}' deleted"}
 
 
 @app.post("/api/device/{mac}/token")
