@@ -4,7 +4,7 @@ import secrets
 from unittest.mock import patch
 
 import pytest
-from httpx import ASGITransport, AsyncClient
+from httpx import AsyncClient
 
 from api.index import app
 from core.config_store import init_db
@@ -34,9 +34,16 @@ async def client(tmp_path):
         await init_stats_db()
         await init_cache_db()
 
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as c:
-            yield c
+        # httpx compatibility wrapper for different versions
+        try:
+            from httpx import ASGITransport  # type: ignore
+
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as c:
+                yield c
+        except Exception:
+            async with AsyncClient(app=app, base_url="http://test") as c:
+                yield c
 
         # Clean up connections after each test
         await db_mod.close_all()
