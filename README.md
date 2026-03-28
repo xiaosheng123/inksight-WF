@@ -1,5 +1,12 @@
 # InkSight（威锋 CZ15/CZ15LW 黑白兼容说明版）
 
+## 官方网址
+**www.inksight.site**
+
+## 源码来源（醒目标注）
+**本仓库基于原项目修改而来：**  
+**https://github.com/datascale-ai/inksight**
+
 > 面向 `WFT0420CZ15LW / HFT0420CZ15 / WF0420T8PCZ15230H` 这类 4.2 寸威锋面板的实际适配说明。
 
 ## 当前结论
