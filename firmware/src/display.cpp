@@ -143,37 +143,57 @@ static int textWidth(int charCount, int scale) {
 
 void showSetupScreen(const char *apName) {
     memset(imgBuf, 0xFF, IMG_BUF_LEN);
+    static uint8_t blackBufSetup[IMG_BUF_LEN];
+    memset(blackBufSetup, 0xFF, IMG_BUF_LEN);
+
+    auto drawTextToBuf = [](uint8_t *buf, const char *msg, int x, int y, int scale) {
+        int rowBytes = W / 8;
+        int len = strlen(msg);
+        for (int ci = 0; ci < len; ci++) {
+            const uint8_t *glyph = getGlyph(msg[ci]);
+            int cx = x + ci * (5 * scale + scale);
+            for (int col = 0; col < 5; col++) {
+                for (int row = 0; row < 7; row++) {
+                    if (glyph[col] & (1 << row)) {
+                        for (int dy = 0; dy < scale; dy++) {
+                            for (int dx = 0; dx < scale; dx++) {
+                                int px = cx + col * scale + dx;
+                                int py = y + row * scale + dy;
+                                if (px >= 0 && px < W && py >= 0 && py < H)
+                                    buf[py * rowBytes + px / 8] &= ~(0x80 >> (px % 8));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    };
 
     // Adaptive text scale based on screen height
     int titleScale = (H < 200) ? 2 : 3;
     int bodyScale  = (H < 200) ? 1 : 2;
 
-    // Proportional Y positions (percentage of screen height)
     int titleY = H * 13 / 100;
     int line1Y = H * 37 / 100;
     int apY    = H * 48 / 100;
     int line3Y = H * 67 / 100;
 
-    // Title: "Setup WiFi" (centered)
     const char *title = "Setup WiFi";
     int titleX = (W - textWidth(strlen(title), titleScale)) / 2;
-    drawText(title, titleX, titleY, titleScale);
+    drawTextToBuf(blackBufSetup, title, titleX, titleY, titleScale); // title on black plane
 
-    // "Connect phone to" (centered)
     const char *line1 = "Connect phone to";
     int line1X = (W - textWidth(strlen(line1), bodyScale)) / 2;
     drawText(line1, line1X, line1Y, bodyScale);
 
-    // AP name (centered)
     int apX = (W - textWidth(strlen(apName), titleScale)) / 2;
     drawText(apName, apX, apY, titleScale);
 
-    // "Open browser" (centered)
     const char *line3 = "Open browser";
     int line3X = (W - textWidth(strlen(line3), bodyScale)) / 2;
     drawText(line3, line3X, line3Y, bodyScale);
 
-    epdDisplay(imgBuf);
+    epdDisplayDual(blackBufSetup, imgBuf);
     Serial.printf("Setup screen shown: %s\n", apName);
 }
 

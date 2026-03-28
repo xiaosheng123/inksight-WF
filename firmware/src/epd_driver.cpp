@@ -1,375 +1,231 @@
 #include "epd_driver.h"
 #include "config.h"
 
-#if defined(EPD_PANEL_42)
-
-// ── Software SPI (bit-bang) for 4.2" Waveshare V2 (SSD1683) ──
-// Avoids Busy Timeout on ESP32-C3 with non-default pins; no GxEPD2 dependency.
-
-static void spiWriteByte(uint8_t data) {
-    for (int i = 0; i < 8; i++) {
-        digitalWrite(PIN_EPD_MOSI, (data & 0x80) ? HIGH : LOW);
-        data <<= 1;
-        digitalWrite(PIN_EPD_SCK, HIGH);
-        digitalWrite(PIN_EPD_SCK, LOW);
-    }
-}
-
-static void epdSendCommand(uint8_t cmd) {
-    digitalWrite(PIN_EPD_DC, LOW);   // DC low = command
-    digitalWrite(PIN_EPD_CS, LOW);
-    spiWriteByte(cmd);
-    digitalWrite(PIN_EPD_CS, HIGH);
-}
-
-static void epdSendData(uint8_t data) {
-    digitalWrite(PIN_EPD_DC, HIGH);  // DC high = data
-    digitalWrite(PIN_EPD_CS, LOW);
-    spiWriteByte(data);
-    digitalWrite(PIN_EPD_CS, HIGH);
-}
-
-static void epdWaitBusy() {
-    unsigned long t0 = millis();
-    while (digitalRead(PIN_EPD_BUSY) == HIGH) {
-        delay(10);
-        if (millis() - t0 > 10000) {
-            Serial.println("EPD busy TIMEOUT!");
-            return;
-        }
-    }
-}
-
-static void epdReset() {
-    digitalWrite(PIN_EPD_RST, HIGH); delay(100);
-    digitalWrite(PIN_EPD_RST, LOW);  delay(2);
-    digitalWrite(PIN_EPD_RST, HIGH); delay(100);
-}
-
-// ── Helper: configure RAM window for full screen ────────────
-
-static void epdSetFullWindow() {
-    epdSendCommand(0x11);  // Data Entry Mode Setting
-    epdSendData(0x03);     //   X increment, Y increment
-
-    epdSendCommand(0x44);  // Set RAM X address range
-    epdSendData(0x00);
-    epdSendData((W - 1) / 8);
-
-    epdSendCommand(0x45);  // Set RAM Y address range
-    epdSendData(0x00);
-    epdSendData(0x00);
-    epdSendData((H - 1) & 0xFF);
-    epdSendData(((H - 1) >> 8) & 0xFF);
-
-    epdSendCommand(0x4E);  // Set RAM X address counter
-    epdSendData(0x00);
-
-    epdSendCommand(0x4F);  // Set RAM Y address counter
-    epdSendData(0x00);
-    epdSendData(0x00);
-}
-
-// ── GPIO initialization ─────────────────────────────────────
-
-void gpioInit() {
-    pinMode(PIN_EPD_BUSY, INPUT);
-    pinMode(PIN_EPD_RST,  OUTPUT);
-    pinMode(PIN_EPD_DC,   OUTPUT);
-    pinMode(PIN_EPD_CS,   OUTPUT);
-    pinMode(PIN_EPD_SCK,  OUTPUT);
-    pinMode(PIN_EPD_MOSI, OUTPUT);
-    pinMode(PIN_CFG_BTN,  INPUT_PULLUP);
-    digitalWrite(PIN_EPD_CS,  HIGH);
-    digitalWrite(PIN_EPD_SCK, LOW);
-}
-
-// ── EPD full init (standard mode, Waveshare 4.2" V2 SSD1683) ──
-
-void epdInit() {
-    epdReset();
-    epdWaitBusy();
-
-    epdSendCommand(0x12);  // Software Reset
-    epdWaitBusy();
-
-    epdSendCommand(0x21);  // Display Update Control 1
-    epdSendData(0x40);     //   Source output mode
-    epdSendData(0x00);
-
-    epdSendCommand(0x3C);  // Border Waveform Control
-    epdSendData(0x05);
-
-    epdSetFullWindow();
-    epdWaitBusy();
-}
-
-// ── EPD fast init (loads fast-refresh LUT via temperature register) ──
-// Based on official Waveshare epd4in2_V2 Init_Fast() implementation.
-// The 0x1A register sets a temperature value that selects faster internal LUT.
-// 0x6E = ~1.5s refresh, 0x5A = ~1s refresh.
-
-void epdInitFast() {
-    epdReset();
-    epdWaitBusy();
-
-    epdSendCommand(0x12);  // Software Reset
-    epdWaitBusy();
-
-    epdSendCommand(0x21);  // Display Update Control 1
-    epdSendData(0x40);
-    epdSendData(0x00);
-
-    epdSendCommand(0x3C);  // Border Waveform Control
-    epdSendData(0x05);
-
-    epdSendCommand(0x1A);  // Write to temperature register
-    epdSendData(0x6E);     //   Value for ~1.5s fast refresh
-
-    epdSendCommand(0x22);  // Display Update Control 2
-    epdSendData(0x91);     //   Load temperature + Load LUT, then power down
-    epdSendCommand(0x20);  // Master Activation
-    epdWaitBusy();
-
-    epdSetFullWindow();
-    epdWaitBusy();
-}
-
-// ── EPD full-screen display (standard full refresh, 0xF7) ───
-// Clears all ghosting but has visible black-white flash (~3-4s).
-
-void epdDisplay(const uint8_t *image) {
-    epdInit();
-
-    int w = W / 8;
-
-    epdSendCommand(0x24);  // Write Black/White RAM
-    for (int j = 0; j < H; j++)
-        for (int i = 0; i < w; i++)
-            epdSendData(image[i + j * w]);
-
-    epdSendCommand(0x26);  // Write RED RAM (old data for refresh)
-    for (int j = 0; j < H; j++)
-        for (int i = 0; i < w; i++)
-            epdSendData(image[i + j * w]);
-
-    epdSendCommand(0x22);  // Display Update Control 2
-    epdSendData(0xF7);     //   Full update sequence
-    epdSendCommand(0x20);  // Activate Display Update Sequence
-    epdWaitBusy();
-}
-
-// ── EPD full-screen display (fast refresh, 0xC7) ────────────
-// Much less flashing than full refresh (~1.5s).
-// Requires epdInitFast() to be called first to load the fast LUT.
-
-void epdDisplayFast(const uint8_t *image) {
-    epdInitFast();
-
-    int w = W / 8;
-
-    epdSendCommand(0x24);  // Write Black/White RAM
-    for (int j = 0; j < H; j++)
-        for (int i = 0; i < w; i++)
-            epdSendData(image[i + j * w]);
-
-    epdSendCommand(0x26);  // Write RED RAM
-    for (int j = 0; j < H; j++)
-        for (int i = 0; i < w; i++)
-            epdSendData(image[i + j * w]);
-
-    epdSendCommand(0x22);  // Display Update Control 2
-    epdSendData(0xC7);     //   Fast update: skip LUT load (already loaded by InitFast)
-    epdSendCommand(0x20);  // Activate Display Update Sequence
-    epdWaitBusy();
-}
-
-// ── EPD partial refresh ─────────────────────────────────────
-
-void epdPartialDisplay(uint8_t *data, int xStart, int yStart, int xEnd, int yEnd) {
-    int xS = xStart / 8;
-    int xE = (xEnd - 1) / 8;
-    int width = xE - xS + 1;
-    int count = width * (yEnd - yStart);
-
-    epdSendCommand(0x3C);  // Border Waveform Control
-    epdSendData(0x80);
-
-    epdSendCommand(0x21);  // Display Update Control 1
-    epdSendData(0x00);
-    epdSendData(0x00);
-
-    epdSendCommand(0x3C);  // Border Waveform Control
-    epdSendData(0x80);
-
-    epdSendCommand(0x44);  // Set RAM X address range
-    epdSendData(xS & 0xFF);
-    epdSendData(xE & 0xFF);
-
-    epdSendCommand(0x45);  // Set RAM Y address range
-    epdSendData(yStart & 0xFF);
-    epdSendData((yStart >> 8) & 0xFF);
-    epdSendData((yEnd - 1) & 0xFF);
-    epdSendData(((yEnd - 1) >> 8) & 0xFF);
-
-    epdSendCommand(0x4E);  // Set RAM X address counter
-    epdSendData(xS & 0xFF);
-
-    epdSendCommand(0x4F);  // Set RAM Y address counter
-    epdSendData(yStart & 0xFF);
-    epdSendData((yStart >> 8) & 0xFF);
-
-    epdSendCommand(0x24);  // Write Black/White RAM
-    for (int i = 0; i < count; i++)
-        epdSendData(data[i]);
-
-    epdSendCommand(0x22);  // Display Update Control 2
-    epdSendData(0xFF);     //   Partial update sequence
-    epdSendCommand(0x20);  // Activate Display Update Sequence
-    epdWaitBusy();
-}
-
-// ── EPD sleep ───────────────────────────────────────────────
-
-void epdSleep() {
-    epdSendCommand(0x10);  // Deep Sleep Mode
-    epdSendData(0x01);     //   Enter deep sleep
-    delay(200);
-}
-
-#else
-// ── Other panel sizes: GxEPD2 (hardware SPI) ─────────────────
-
 #include <SPI.h>
-#include <GxEPD2_BW.h>
 
-#if defined(EPD_PANEL_29)
-  #include <gdey/GxEPD2_290_GDEY029T94.h>
-  GxEPD2_BW<GxEPD2_290_GDEY029T94, GxEPD2_290_GDEY029T94::HEIGHT> display(
-      GxEPD2_290_GDEY029T94(PIN_EPD_CS, PIN_EPD_DC, PIN_EPD_RST, PIN_EPD_BUSY));
-  static uint8_t rotated_buffer[IMG_BUF_LEN];
-
-  static bool is_black_pixel(const uint8_t* buffer, int width, int x, int y) {
-      int row_bytes = (width + 7) / 8;
-      return (buffer[y * row_bytes + x / 8] & (0x80 >> (x % 8))) == 0;
-  }
-
-  static void set_black_pixel(uint8_t* buffer, int width, int x, int y) {
-      int row_bytes = (width + 7) / 8;
-      buffer[y * row_bytes + x / 8] &= ~(0x80 >> (x % 8));
-  }
-
-  static void rotate_landscape_to_panel(const uint8_t* source) {
-      memset(rotated_buffer, 0xFF, sizeof(rotated_buffer));
-      for (int src_y = 0; src_y < H; src_y++) {
-          for (int src_x = 0; src_x < W; src_x++) {
-              if (!is_black_pixel(source, W, src_x, src_y)) continue;
-              int dst_x = src_y;
-              int dst_y = W - 1 - src_x;
-              set_black_pixel(rotated_buffer, GxEPD2_290_GDEY029T94::WIDTH, dst_x, dst_y);
-          }
-      }
-  }
-#elif defined(EPD_PANEL_583)
-  #include <gdeq/GxEPD2_583_GDEQ0583T31.h>
-  GxEPD2_BW<GxEPD2_583_GDEQ0583T31, GxEPD2_583_GDEQ0583T31::HEIGHT / 4> display(
-      GxEPD2_583_GDEQ0583T31(PIN_EPD_CS, PIN_EPD_DC, PIN_EPD_RST, PIN_EPD_BUSY));
-#elif defined(EPD_PANEL_75)
-  #include <epd/GxEPD2_750_T7.h>
-  GxEPD2_BW<GxEPD2_750_T7, GxEPD2_750_T7::HEIGHT / 4> display(
-      GxEPD2_750_T7(PIN_EPD_CS, PIN_EPD_DC, PIN_EPD_RST, PIN_EPD_BUSY));
+#if defined(WFT_CZ15) && defined(EPD_PANEL_42)
+ #include <GxEPD2_3C.h>
+ static GxEPD2_3C<GxEPD2_420c_CZ15, GxEPD2_420c_CZ15::HEIGHT> display(
+ GxEPD2_420c_CZ15(PIN_EPD_CS, PIN_EPD_DC, PIN_EPD_RST, PIN_EPD_BUSY));
+ #define WFT_DRIVER_NAME "GxEPD2_420c_CZ15"
+#elif defined(WFT_4COLOR_F52) && defined(EPD_PANEL_42)
+ #include <GxEPD2_4C.h>
+ static GxEPD2_4C<GxEPD2_420c_GDEY0420F51, GxEPD2_420c_GDEY0420F51::HEIGHT /2> display(
+ GxEPD2_420c_GDEY0420F51(PIN_EPD_CS, PIN_EPD_DC, PIN_EPD_RST, PIN_EPD_BUSY));
+ #define WFT_DRIVER_NAME "GxEPD2_420c_GDEY0420F51"
+#elif defined(WFT_4IN2B) && defined(EPD_PANEL_42)
+ #include <GxEPD2_3C.h>
+ #if defined(WFT_DRIVER_Z21)
+  static GxEPD2_3C<GxEPD2_420c_Z21, GxEPD2_420c_Z21::HEIGHT /2> display(
+  GxEPD2_420c_Z21(PIN_EPD_CS, PIN_EPD_DC, PIN_EPD_RST, PIN_EPD_BUSY));
+  #define WFT_DRIVER_NAME "GxEPD2_420c_Z21"
+ #elif defined(WFT_DRIVER_Z98)
+  static GxEPD2_3C<GxEPD2_420c_GDEY042Z98, GxEPD2_420c_GDEY042Z98::HEIGHT /2> display(
+  GxEPD2_420c_GDEY042Z98(PIN_EPD_CS, PIN_EPD_DC, PIN_EPD_RST, PIN_EPD_BUSY));
+  #define WFT_DRIVER_NAME "GxEPD2_420c_GDEY042Z98"
+ #elif defined(WFT_DRIVER_1680)
+  static GxEPD2_3C<GxEPD2_420c_1680, GxEPD2_420c_1680::HEIGHT /2> display(
+  GxEPD2_420c_1680(PIN_EPD_CS, PIN_EPD_DC, PIN_EPD_RST, PIN_EPD_BUSY));
+  #define WFT_DRIVER_NAME "GxEPD2_420c_1680"
+ #else
+  static GxEPD2_3C<GxEPD2_420c, GxEPD2_420c::HEIGHT /2> display(
+  GxEPD2_420c(PIN_EPD_CS, PIN_EPD_DC, PIN_EPD_RST, PIN_EPD_BUSY));
+  #define WFT_DRIVER_NAME "GxEPD2_420c"
+ #endif
 #else
-  #error "No EPD panel type defined. Use -DEPD_PANEL_42, -DEPD_PANEL_29, -DEPD_PANEL_583, or -DEPD_PANEL_75"
+ #include <GxEPD2_BW.h>
+ #include <epd/GxEPD2_420.h>
+ static GxEPD2_BW<GxEPD2_420, GxEPD2_420::HEIGHT /2> display(
+ GxEPD2_420(PIN_EPD_CS, PIN_EPD_DC, PIN_EPD_RST, PIN_EPD_BUSY));
+ #define WFT_DRIVER_NAME "GxEPD2_420"
 #endif
 
-static bool _initialized = false;
+static bool g_epd_initialized = false;
 
-void gpioInit() {
-    pinMode(PIN_CFG_BTN, INPUT_PULLUP);
-    SPI.begin(PIN_EPD_SCK, -1, PIN_EPD_MOSI, PIN_EPD_CS);
+static void configureSpiBus() {
+ SPI.begin(PIN_EPD_SCK, -1, PIN_EPD_MOSI, PIN_EPD_CS);
+ display.epd2.selectSPI(SPI, SPISettings(20000000, MSBFIRST, SPI_MODE0));
 }
 
-void epdInit() {
-    if (!_initialized) {
-        display.init(0);
-        display.setRotation(1);
-        _initialized = true;
-    }
+static void ensureDisplayReady() {
+ if (g_epd_initialized) return;
+ configureSpiBus();
+ Serial.print("EPD init: ");
+ Serial.println(WFT_DRIVER_NAME);
+ display.init(0, true, 10, false);
+ display.setRotation(1);
+ g_epd_initialized = true;
 }
 
-void epdInitFast() {
-    epdInit();
+void gpioInit() { pinMode(PIN_CFG_BTN, INPUT_PULLUP); configureSpiBus(); }
+void epdInit() { ensureDisplayReady(); }
+void epdInitFast() { ensureDisplayReady(); }
+
+static uint8_t g_white_plane[IMG_BUF_LEN];
+static uint8_t g_inverted_plane[IMG_BUF_LEN];
+static uint8_t g_combo_plane[IMG_BUF_LEN];
+
+static void ensureWhitePlane() {
+ memset(g_white_plane, 0xFF, sizeof(g_white_plane));
+}
+
+static void addBlackMarkerPlane() {
+#if defined(WFT_CZ15)
+  // v19: expand black-plane test from tiny square to L-shape marker + short label bars
+  auto setBlack = [](int x, int y) {
+    if (x < 0 || x >= W || y < 0 || y >= H) return;
+    int idx = y * (W / 8) + (x / 8);
+    g_white_plane[idx] &= ~(0x80 >> (x % 8));
+  };
+  // L-shape in top-left
+  for (int y = 12; y < 64; ++y) {
+    for (int x = 12; x < 22; ++x) setBlack(x, y);
+  }
+  for (int y = 54; y < 64; ++y) {
+    for (int x = 12; x < 74; ++x) setBlack(x, y);
+  }
+  // two short horizontal bars near title area as stronger black-plane probe
+  for (int y = 84; y < 92; ++y) {
+    for (int x = 24; x < 120; ++x) setBlack(x, y);
+  }
+  for (int y = 98; y < 106; ++y) {
+    for (int x = 24; x < 90; ++x) setBlack(x, y);
+  }
+#endif
+}
+
+static void invertToColorPlane(const uint8_t* src) {
+ for (size_t i = 0; i < IMG_BUF_LEN; ++i) g_inverted_plane[i] = ~src[i];
 }
 
 void epdDisplay(const uint8_t *image) {
-    epdInit();
-#if defined(EPD_PANEL_29)
-    rotate_landscape_to_panel(image);
-    display.writeImage(
-        rotated_buffer,
-        0,
-        0,
-        GxEPD2_290_GDEY029T94::WIDTH,
-        GxEPD2_290_GDEY029T94::HEIGHT,
-        false,
-        false,
-        false
-    );
+ ensureDisplayReady();
+#if defined(WFT_CZ15)
+ ensureWhitePlane();
+ addBlackMarkerPlane();
+ invertToColorPlane(image);
+ display.epd2.clearScreen(0xFF, 0xFF);
+ display.writeImage(g_white_plane, g_inverted_plane, 0, 0, W, H, false, false, false);
+ display.refresh(false);
 #else
-    display.writeImage(image, 0, 0, W, H, false, false, true);
+ display.writeImage(image, 0, 0, W, H, false, false, false);
+ display.refresh(false);
 #endif
-    display.refresh(false);
-    display.powerOff();
 }
 
-void epdDisplayFast(const uint8_t *image) {
-    epdInit();
-#if defined(EPD_PANEL_29)
-    rotate_landscape_to_panel(image);
-    display.writeImage(
-        rotated_buffer,
-        0,
-        0,
-        GxEPD2_290_GDEY029T94::WIDTH,
-        GxEPD2_290_GDEY029T94::HEIGHT,
-        false,
-        false,
-        false
-    );
+void epdDisplayDual(const uint8_t *blackImage, const uint8_t *colorImage) {
+ ensureDisplayReady();
+#if defined(WFT_CZ15)
+ ensureWhitePlane();
+ const uint8_t* blackPlane = blackImage ? blackImage : g_white_plane;
+ if (colorImage) invertToColorPlane(colorImage);
+ else memset(g_inverted_plane, 0xFF, sizeof(g_inverted_plane));
+ display.epd2.clearScreen(0xFF, 0xFF);
+ display.writeImage(blackPlane, g_inverted_plane, 0, 0, W, H, false, false, false);
+ display.refresh(false);
 #else
-    display.writeImage(image, 0, 0, W, H, false, false, true);
+ if (blackImage) {
+  display.writeImage(blackImage, 0, 0, W, H, false, false, false);
+ } else if (colorImage) {
+  display.writeImage(colorImage, 0, 0, W, H, false, false, false);
+ }
+ display.refresh(false);
 #endif
-    display.refresh(true);
-    display.powerOff();
 }
+
+void epdDisplayDualCombo(const uint8_t *blackImage, const uint8_t *colorImage) {
+ ensureDisplayReady();
+#if defined(WFT_CZ15)
+ memset(g_combo_plane, 0xFF, sizeof(g_combo_plane));
+ for (size_t i = 0; i < IMG_BUF_LEN; ++i) {
+  uint8_t b = blackImage ? blackImage[i] : 0xFF;
+  uint8_t c = colorImage ? colorImage[i] : 0xFF;
+  // v23 experimental combo encoding: preserve black bits, mark color bits with opposite polarity
+  g_combo_plane[i] = b & ~c;
+ }
+ display.epd2.clearScreen(0xFF, 0xFF);
+ display.writeImage(g_combo_plane, 0, 0, W, H, false, false, false);
+ display.refresh(false);
+#else
+ epdDisplayDual(blackImage, colorImage);
+#endif
+}
+
+void epdDisplayFast(const uint8_t *image) { epdDisplay(image); }
 
 void epdPartialDisplay(uint8_t *data, int xStart, int yStart, int xEnd, int yEnd) {
-    epdInit();
-#if defined(EPD_PANEL_29)
-    rotate_landscape_to_panel(imgBuf);
-    display.writeImage(
-        rotated_buffer,
-        0,
-        0,
-        GxEPD2_290_GDEY029T94::WIDTH,
-        GxEPD2_290_GDEY029T94::HEIGHT,
-        false,
-        false,
-        false
-    );
-    display.refresh(true);
+ ensureDisplayReady();
+ const int width = xEnd - xStart;
+ const int height = yEnd - yStart;
+ if (width <= 0 || height <= 0) return;
+#if defined(WFT_CZ15)
+ ensureWhitePlane();
+ invertToColorPlane(data);
+ display.writeImagePart(g_white_plane, g_inverted_plane, xStart, yStart, W, H, xStart, yStart, width, height, false, false, false);
+ display.refresh(xStart, yStart, width, height);
 #else
-    int w = xEnd - xStart;
-    int h = yEnd - yStart;
-    display.writeImage(data, xStart, yStart, w, h, false, false, true);
-    display.refresh(xStart, yStart, w, h);
+ display.writeImage(data, xStart, yStart, width, height, false, false, false);
+ display.refresh(xStart, yStart, width, height);
 #endif
-    display.powerOff();
 }
 
 void epdSleep() {
-    display.hibernate();
-    _initialized = false;
+ if (!g_epd_initialized) return;
+ display.hibernate();
+ g_epd_initialized = false;
 }
 
-#endif // EPD_PANEL_42
+void epd_wft_4in2b_init() { epdInit(); }
+void epd_wft_4in2b_clear(uint8_t color) {
+ ensureDisplayReady();
+ if (color == 0) display.clearScreen(0x00);
+ else display.clearScreen(0xFF);
+ display.refresh(false);
+}
+void epd_wft_4in2b_display(const uint8_t* image, size_t len) { (void)len; epdDisplay(image); }
+void epd_wft_4in2b_dual_plane_test(const uint8_t* black, const uint8_t* color) {
+#if defined(WFT_4IN2B) || defined(WFT_CZ15)
+ ensureDisplayReady();
+ Serial.println("[EPD TEST] dual_plane_test v13: practical mode, black plane forced white, content via color plane");
+ display.epd2.clearScreen(0xFF, 0xFF);
+ display.writeImage(nullptr, color, 0, 0, W, H, false, false, false);
+ display.refresh(false);
+#else
+ (void)black; (void)color;
+#endif
+}
+void epd_wft_4in2b_ram_channel_test(const uint8_t* plane10, const uint8_t* plane13) {
+#if defined(WFT_4IN2B) || defined(WFT_CZ15)
+ ensureDisplayReady();
+ display.epd2.writeScreenBuffer(0xFF);
+ display.epd2.writeImage(plane10, plane13, 0, 0, W, H, false, false, false);
+ display.refresh(false);
+#else
+ (void)plane10; (void)plane13;
+#endif
+}
+void epd_wft_4in2b_native_test(const uint8_t* data1, const uint8_t* data2) {
+#if defined(WFT_4IN2B) || defined(WFT_CZ15)
+ ensureDisplayReady();
+ display.epd2.writeScreenBuffer(0xFF);
+ display.epd2.writeNative(data1, data2, 0, 0, W, H, false, false, false);
+ display.refresh(false);
+#else
+ (void)data1; (void)data2;
+#endif
+}
+void epd_wft_4in2b_old_compat_test(const uint8_t* black, const uint8_t* color, bool doClear) {
+#if defined(WFT_4IN2B) || defined(WFT_CZ15)
+ ensureDisplayReady();
+ if (doClear) {
+  display.clearScreen(0xFF);
+  display.refresh(false);
+  delay(500);
+ }
+ display.writeImage(black, color, 0, 0, W, H, false, false, false);
+ display.refresh(false);
+#else
+ (void)black; (void)color; (void)doClear;
+#endif
+}
+void epd_wft_4in2b_sleep() { epdSleep(); }
