@@ -1,127 +1,145 @@
-English | [中文](README_ZH.md)
+# InkSight（威锋 CZ15/CZ15LW 黑白兼容说明版）
 
-# InkSight
+> 面向 `WFT0420CZ15LW / HFT0420CZ15 / WF0420T8PCZ15230H` 这类 4.2 寸威锋面板的实际适配说明。
 
-> A calm e-ink desk companion with one website for flashing, configuration, preview, and discovering new modes.
+## 当前结论
 
-Official website: [https://www.inksight.site](https://www.inksight.site)
+针对这类 WEIFENG / Vision Peak `CZ15/CZ15LW` 面板，当前这份适配工作的结论是：
 
-![InkSight](images/intro.jpg)
+- 面板已成功点亮并可稳定工作在 **黑白兼容模式**。
+- InkSight 真实主流程（如 Wi‑Fi 配网页）已经可以正常显示。
+- 在当前驱动栈下，**第三色尚未成功稳定调出**，因此建议先按黑白信息屏使用。
 
-## Why It Stands Out
+## 推荐保留固件
 
-InkSight turns a small e-ink screen into a quiet, always-visible information surface for your desk.
-Instead of another glowing notification feed, it gives you useful, beautiful, and customizable content in a paper-like form.
+推荐日常保留以下两个版本：
 
-- **Useful at a glance** — weather, countdowns, memos, habits, briefings, and daily prompts
-- **Made for desks** — a paper-like e-ink display that stays visible without adding screen fatigue
-- **Beautiful and varied** — 24 built-in modes, from practical dashboards to more atmospheric content
-- **A one-stop website experience** — beginner-friendly browser flashing, online setup, preview, and mode discovery
-- **Open and extensible** — firmware, backend, web configuration, and the JSON mode system are all designed to be expanded over time, including future hardware design files
+- `wft_cz15_final_bw.bin` — 稳定黑白兼容版
+- `wft_cz15_final_bw_no_time_partial.bin` — 稳定黑白兼容版（禁用时间区域局部刷新）
 
-## One Website, End to End
+## 推荐硬件
 
-The website brings the whole user flow together in one place.
-Even if you are completely new to e-paper devices, ESP32 boards, or WebSerial, the product is designed so you can get started by following the UI step by step instead of assembling your own toolchain first.
+- MCU：ESP32-C3 开发板（常见 SuperMini / DevKitM-1 类）
+- 面板：4.2 寸 SPI 电子墨水屏
+- 当前适配面板家族：
+  - `WFT0420CZ15LW`
+  - `HFT0420CZ15`
+  - `WF0420T8PCZ15230H`
 
-- **Flash firmware in the browser** with the Web Flasher, without starting from a local flashing setup
-- **Configure devices online** with modes, preferences, refresh strategy, and per-mode overrides
-- **Preview content before saving** so the final e-ink result is visible in advance
-- **Try it even without a device** through the no-device demo flow
-- **Discover community creations** in the mode plaza, then install and reuse ideas shared by other users
+## 接线图（ESP32-C3 ↔ WFT0420CZ15LW）
 
-This makes InkSight feel less like a kit with scattered tools and more like a complete product experience.
+| ESP32-C3 引脚 | 墨水屏引脚 | 说明 |
+|---|---|---|
+| `3V3` | `VCC` | 屏幕供电 |
+| `GND` | `GND` | 地 |
+| `GPIO4` | `CLK / SCK` | SPI 时钟 |
+| `GPIO6` | `DIN / MOSI / SDI` | SPI 数据 |
+| `GPIO7` | `CS` | 片选 |
+| `GPIO1` | `DC` | 数据/命令切换 |
+| `GPIO2` | `RST / RES` | 屏幕复位 |
+| `GPIO10` | `BUSY` | 忙信号 |
 
-## Rich Mode Library
+### 文字版接线图
 
-InkSight currently ships with **24 built-in modes**, including:
+```text
+ESP32-C3                     WFT0420CZ15LW 墨水屏
+---------------------------------------------------
+3V3      ------------------> VCC
+GND      ------------------> GND
+GPIO4    ------------------> CLK / SCK
+GPIO6    ------------------> DIN / MOSI / SDI
+GPIO7    ------------------> CS
+GPIO1    ------------------> DC
+GPIO2    ------------------> RST / RES
+GPIO10   ------------------> BUSY
+```
 
-- **Daily Picks** — quotes, books, facts, and seasonal context
-- **Weather Dashboard** — live weather with practical advice
-- **Poetry / Zen / Stoic** — calm, reflective content for focused desks
-- **AI Briefing** — technology highlights and AI insights
-- **ArtWall** — black-and-white AI artwork tailored to context
-- **Memo / Countdown / Habit / Fitness** — practical everyday desk utilities
+## 其它已定义引脚
 
-You can also:
+| 功能 | 引脚 |
+|---|---|
+| 配置按键 | `GPIO9` |
+| LED | `GPIO3` |
+| 电池检测 | `GPIO0` |
 
-- **create custom modes**
-- **save them to your device**
-- **share them to the mode plaza**
-- **install community-created modes**
+## 按键说明
 
-## Recommended Hardware
+在推荐的 ESP32-C3 开发板上，通常会有两个实体按键：
 
-InkSight is easiest to build with the following setup:
+- **RST**：复位按键
+- **BOOT / 用户键**：功能按键（具体是否为 BOOT，以开发板设计为准）
 
-| Part | Recommended choice |
-|------|--------------------|
-| MCU | ESP32-C3 development board |
-| Display | 4.2-inch SPI e-paper display |
-| Power | USB for development, optional lithium battery build (recommended `505060-2000mAh` + TP5000) |
-| Cost | Typical DIY BOM around **CNY 220** |
+在当前 InkSight 固件配置中，功能按键使用：
 
-The public documentation and setup flow are centered on **ESP32-C3 + 4.2-inch e-paper**.
+- **`PIN_CFG_BTN`**
+- 对 ESP32-C3 配置为：**GPIO9**
 
-For a first build, start with **ESP32-C3 + 4.2-inch e-paper**.
+### 1. RST 按键（硬件复位）
+**作用：** 直接执行硬件复位。
 
-## Notes for the WEIFENG CZ15/CZ15LW 4.2-inch Panel
+**用法：** 短按一次，设备会立即重启。
 
-If you are using the WEIFENG / Vision Peak 4.2-inch panel family such as `WFT0420CZ15LW`, `HFT0420CZ15`, or back-label variants like `WF0420T8PCZ15230H`, there are some practical compatibility notes:
+**说明：** 这是硬件级复位，不依赖固件逻辑，通常用于死机、异常状态或手动重启。
 
-- This panel family can be brought up successfully with InkSight on **ESP32-C3**.
-- In the current compatibility state, the panel is best treated as a **stable black-and-white compatible display**.
-- The firmware adaptation work in this fork uses the panel in a reliable black/white mode first, rather than claiming complete third-color support.
-- For day-to-day use, keep the proven compatibility builds and avoid experimental color builds unless you are actively debugging the panel driver.
+### 2. 配置按键（GPIO9）
+该按键在很多 ESP32-C3 小板上通常对应 **BOOT / 用户键**，但具体请以开发板原理图或丝印为准。
 
-Recommended local firmware outputs from this compatibility work:
+#### 短按
+**判定条件：**
+- 按下时间不少于 **50ms**
+- 小于 **2 秒**
 
-- `wft_cz15_final_bw.bin` — stable black/white compatible build
-- `wft_cz15_final_bw_no_time_partial.bin` — same as above, but with time-region partial refresh disabled
+**作用：**
+在 **Live 模式** 和 **普通定时刷新模式** 之间切换。
 
-These notes reflect practical bring-up results for the CZ15/CZ15LW hardware family and are intended to help others avoid repeatedly re-testing the same dead ends.
+- **普通定时刷新模式**：按 Web 配置中的周期工作，更省电，适合日常使用。
+- **Live 模式**：保持联网并以更短周期检查更新，适合调试或频繁修改配置时使用，但功耗更高。
 
-## Explore the Official Website
+#### 长按
+**判定条件：**
+- 长按约 **2 秒**
 
-![Official Website](images/official_web_screenshot.png)
+**作用：**
+触发设备重启。不同固件版本下，可能会先显示 `Restarting`，也可能直接重启。
 
-If you want to get a feel for the product before buying parts or setting up anything locally, the official website is the best place to start:
+#### 开机按住
+**动作：**
+在设备开机或按下 RST 重启后，按住该功能键不放。
 
-- **Homepage** — a quick overview of the product and how the experience fits together
-- **Web flasher** — browser-based firmware flashing, with a walkthrough video here: [`Flashing tutorial`](https://www.bilibili.com/video/BV1aWcQzQE3r/?spm_id_from=333.1387.homepage.video_card.click&vd_source=166ea338ef8c38d7904da906b88ef0b7)
-- **Device configuration** — once a device is flashed, this is where you configure what it shows
-- **Mode plaza** — browse community-made creations, publish your own, or install modes shared by other users
-- **No-device demo** — try the experience even if you do not own the hardware yet
+**作用：**
+强制进入 **配置门户（Captive Portal）** 模式。
 
-## Build the Device
+**适用场景：**
+- 更换 Wi‑Fi
+- 修改后端地址
+- 救援联网失败设备
+- 重新进入配置界面
 
-If you enjoy DIY hardware and want to build your own InkSight unit, or if you already have the parts but are not sure how to wire and assemble them, start here:
+**补充：**
+如果设备尚未配置过 Wi‑Fi，开机通常会自动进入配置模式。
 
-![Build the Device](images/build-device.png)
+## 供电提醒
 
-You can also follow the step-by-step assembly video here: [`Assembly tutorial`](https://www.bilibili.com/video/BV1spwKzUE6N?spm_id_from=333.788.videopod.sections&vd_source=166ea338ef8c38d7904da906b88ef0b7)
+### 屏幕逻辑供电
+- 屏幕 `VCC` 接 `3V3`
+- 不要把 5V 直接灌到屏幕逻辑口
 
-We also provide the matching docs:
+### 给 ESP32 开发板供电
+- 若使用 5V 供电，请接开发板的 `5V / VIN / VBUS`
+- 若使用单节 18650，请不要直接当 5V 用，也不要直接硬接 `3V3`
+- 更稳的做法是先经过合适的稳压/升压模块后再供板
 
-- Hardware guide: [`docs/hardware.md`](docs/hardware.md)
-- Assembly guide: [`docs/assembly.md`](docs/assembly.md)
-- Flashing guide: [`docs/flash.md`](docs/flash.md)
-- Configuration guide: [`docs/config.md`](docs/config.md)
+## 当前适配状态
 
-## Self-Host or Develop
+### 已完成
+- 威锋 `CZ15/CZ15LW` 面板已成功点亮
+- 黑白兼容显示已稳定
+- 配网页 / 主流程可正常显示
 
-If you are a developer, want to run your own local deployment, or want to go beyond the hosted website and build custom integrations or workflows, start here:
+### 未完成
+- 第三色未成功稳定调出
+- 当前不建议把该面板当成熟三色屏直接使用
 
-- Deployment guide: [`docs/en/deploy.md`](docs/en/deploy.md)
-- 中文部署文档：[`docs/deploy.md`](docs/deploy.md)
-- Architecture: [`docs/en/architecture.md`](docs/en/architecture.md)
-- API: [`docs/en/api.md`](docs/en/api.md)
-- Plugin / extension development: [`docs/en/plugin-dev.md`](docs/en/plugin-dev.md)
+## 建议
 
-## Community
-
-- Discord: [https://discord.gg/5Ne6D4YNf](https://discord.gg/5Ne6D4YNf)
-- QQ 群: [1026120682](http://qm.qq.com/cgi-bin/qm/qr?_wv=1027&k=kha7gD4FzS3ld_f9bx_TlLIj94Oyoip1&authKey=n4yACMiVaMagSs5HUH5HLw%2BhXdKRFjCDI4rAt7zdVym7yTeXwMxTkWqUjE9jzjXo&noverify=0&group_code=1026120682)
-- BiliBili: [https://www.bilibili.com/video/BV1nSNcziE7q/](https://www.bilibili.com/video/BV1nSNcziE7q/)
-
-![QQ Group QR Code](images/QQ_EN.jpg)
+如果您正在使用这类威锋 4.2 寸面板，请优先采用上面的两个黑白兼容固件版本，不要轻易刷入实验版颜色驱动。等未来出现更接近原厂的专用驱动资料或波形支持，再重新尝试第三色适配。
