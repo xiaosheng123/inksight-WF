@@ -65,6 +65,22 @@ The public documentation and setup flow are centered on **ESP32-C3 + 4.2-inch e-
 
 For a first build, start with **ESP32-C3 + 4.2-inch e-paper**.
 
+## Notes for the WEIFENG CZ15/CZ15LW 4.2-inch Panel
+
+If you are using the WEIFENG / Vision Peak 4.2-inch panel family such as `WFT0420CZ15LW`, `HFT0420CZ15`, or back-label variants like `WF0420T8PCZ15230H`, there are some practical compatibility notes:
+
+- This panel family can be brought up successfully with InkSight on **ESP32-C3**.
+- In the current compatibility state, the panel is best treated as a **stable black-and-white compatible display**.
+- The firmware adaptation work in this fork uses the panel in a reliable black/white mode first, rather than claiming complete third-color support.
+- For day-to-day use, keep the proven compatibility builds and avoid experimental color builds unless you are actively debugging the panel driver.
+
+Recommended local firmware outputs from this compatibility work:
+
+- `wft_cz15_final_bw.bin` — stable black/white compatible build
+- `wft_cz15_final_bw_no_time_partial.bin` — same as above, but with time-region partial refresh disabled
+
+These notes reflect practical bring-up results for the CZ15/CZ15LW hardware family and are intended to help others avoid repeatedly re-testing the same dead ends.
+
 ## Explore the Official Website
 
 ![Official Website](images/official_web_screenshot.png)
