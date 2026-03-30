@@ -11,9 +11,21 @@
 #include "storage.h"
 #include "portal.h"
 #include "offline_cache.h"
+#include "screen_ink.h"
+#include "weather.h"
 
 // ── Shared framebuffer (referenced by other modules via extern) ──
 uint8_t imgBuf[IMG_BUF_LEN];
+
+// jcalendar compatibility globals
+int _wifi_status = 1;
+void wifi_exec(int status = 0) { _wifi_status = status <= 0 ? 1 : status; }
+int si_wifi_status() { return _wifi_status; }
+void si_wifi() {}
+void weather_exec(int status);
+void si_weather() { weather_exec(0); }
+int si_weather_status() { return weather_status(); }
+
 
 // ── Device state machine ────────────────────────────────────
 enum class DeviceState : uint8_t {
@@ -32,6 +44,7 @@ struct DeviceContext {
 
     // Button state
     unsigned long btnPressStart = 0;
+    bool ignoreConfigButtonUntilRelease = false;
     bool liveMode = false;
     unsigned long lastLivePollAt = 0;
     unsigned long lastLiveWiFiRetryAt = 0;
@@ -65,12 +78,71 @@ static void handleLiveMode();
 static bool waitForContentReady();
 static void handleFailure(const char *reason);
 static void enterDeepSleep(int minutes);
+static void enterPortalMode();
+static void ledFeedback(const char *pattern);
+static void drawBootTestPattern();
+
+
+static void drawBootTestPattern() {
+    Serial.println("[DBG] drawBootTestPattern: begin");
+    memset(imgBuf, 0xFF, IMG_BUF_LEN);
+    int rowBytes = W / 8;
+    auto setBlack = [&](int x, int y) {
+        if (x < 0 || x >= W || y < 0 || y >= H) return;
+        imgBuf[y * rowBytes + x / 8] &= ~(0x80 >> (x % 8));
+    };
+    // border
+    for (int x = 8; x < W - 8; ++x) {
+        setBlack(x, 8);
+        setBlack(x, H - 9);
+    }
+    for (int y = 8; y < H - 8; ++y) {
+        setBlack(8, y);
+        setBlack(W - 9, y);
+    }
+    // cross lines
+    for (int i = 20; i < ((W < H) ? W : H) - 20; ++i) {
+        setBlack(i, i / 2);
+        int y = H - 1 - i / 2;
+        if (y >= 0 && y < H) setBlack(i, y);
+    }
+    // corner blocks
+    for (int y = 20; y < 50; ++y) {
+        for (int x = 20; x < 80; ++x) setBlack(x, y);
+    }
+    for (int y = H - 50; y < H - 20; ++y) {
+        for (int x = W - 80; x < W - 20; ++x) setBlack(x, y);
+    }
+    Serial.println("[DBG] drawBootTestPattern: epdDisplay");
+    epdDisplay(imgBuf);
+    Serial.println("[DBG] drawBootTestPattern: done");
+}
 
 // ── LED feedback ────────────────────────────────────────────
 
 static void ledInit() {
     pinMode(PIN_LED, OUTPUT);
     digitalWrite(PIN_LED, LOW);
+}
+
+static void enterPortalMode() {
+    String mac = WiFi.macAddress();
+    String apName = "InkSight-" + mac.substring(mac.length() - 5);
+    apName.replace(":", "");
+
+    ctx.liveMode = false;
+    ctx.wantEnterLiveMode = false;
+    ctx.wantRefresh = false;
+    ctx.btnPressStart = 0;
+
+    WiFi.disconnect(true);
+    WiFi.mode(WIFI_OFF);
+
+    ledFeedback("portal");
+    showSetupScreen(apName.c_str());
+    startCaptivePortal();
+    ctx.state = DeviceState::PORTAL;
+    ctx.ignoreConfigButtonUntilRelease = (digitalRead(PIN_CFG_BTN) == LOW);
 }
 
 static void ledFeedback(const char *pattern) {
@@ -115,10 +187,15 @@ void setup() {
     Serial.println("\n=== InkSight ===");
 
     gpioInit();
+    Serial.println("[DBG] gpioInit ok");
     ledInit();
+    Serial.println("[DBG] ledInit ok");
     epdInit();
+    Serial.println("[DBG] epdInit ok");
     cacheInit();
     Serial.println("EPD ready");
+    drawBootTestPattern();
+    delay(1500);
 
     loadConfig();
 
@@ -134,27 +211,14 @@ void setup() {
         Serial.println(forcePortal ? "Config button held -> portal"
                                    : "No WiFi config -> portal");
 
-        String mac = WiFi.macAddress();
-        String apName = "InkSight-" + mac.substring(mac.length() - 5);
-        apName.replace(":", "");
-
-        ledFeedback("portal");
-        showSetupScreen(apName.c_str());
-        startCaptivePortal();
-        ctx.state = DeviceState::PORTAL;
+        enterPortalMode();
         return;
     }
 
     // Check server URL is configured
     if (cfgServer.length() == 0) {
         Serial.println("No server URL configured -> portal");
-        String mac = WiFi.macAddress();
-        String apName = "InkSight-" + mac.substring(mac.length() - 5);
-        apName.replace(":", "");
-        ledFeedback("portal");
-        showSetupScreen(apName.c_str());
-        startCaptivePortal();
-        ctx.state = DeviceState::PORTAL;
+        enterPortalMode();
         return;
     }
 
@@ -164,6 +228,11 @@ void setup() {
 
     ledFeedback("connecting");
     if (!connectWiFi()) {
+        if (g_userAborted) {
+            Serial.println("User aborted during WiFi connect -> portal");
+            enterPortalMode();
+            return;
+        }
         ledFeedback("fail");
         handleFailure("WiFi failed");
         return;
@@ -176,11 +245,23 @@ void setup() {
     } else {
         focusListening = false;
     }
+    if (g_userAborted) {
+        Serial.println("User aborted during focus fetch -> portal");
+        enterPortalMode();
+        return;
+    }
 
     Serial.println("Fetching image...");
+    // jcalendar render pass
+    si_screen();
     ledFeedback("downloading");
     bool gotFallback = false;
     bool ok = fetchBMP(false, &gotFallback);
+    if (g_userAborted) {
+        Serial.println("User aborted during fetch -> portal");
+        enterPortalMode();
+        return;
+    }
     if (!ok || gotFallback) {
         if (!waitForContentReady()) {
             ledFeedback("fail");
@@ -560,6 +641,14 @@ static bool waitForContentReady() {
 
 static void checkConfigButton() {
     bool isPressed = (digitalRead(PIN_CFG_BTN) == LOW);
+
+    if (ctx.ignoreConfigButtonUntilRelease) {
+        if (!isPressed) {
+            ctx.ignoreConfigButtonUntilRelease = false;
+        }
+        ctx.btnPressStart = 0;
+        return;
+    }
 
     if (isPressed) {
         if (ctx.btnPressStart == 0) {

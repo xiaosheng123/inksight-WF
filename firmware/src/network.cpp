@@ -11,6 +11,19 @@
 // ── Time state ──────────────────────────────────────────────
 int curHour, curMin, curSec;
 static unsigned long lastHeartbeatAt = 0;
+bool g_userAborted = false;
+
+static bool checkAbort() {
+    if (digitalRead(PIN_CFG_BTN) == LOW) {
+        delay(50);
+        if (digitalRead(PIN_CFG_BTN) == LOW) {
+            g_userAborted = true;
+            return true;
+        }
+    }
+    return false;
+}
+
 static bool beginHttpForUrl(HTTPClient &http, WiFiClient &plainClient, WiFiClientSecure &secClient, const String &url);
 static bool recoverDeviceTokenIfUnauthorized(int code);
 static String extractJsonStringField(const String &body, const char *key);
@@ -18,12 +31,14 @@ static String extractJsonStringField(const String &body, const char *key);
 // ── WiFi connection ─────────────────────────────────────────
 
 bool connectWiFi() {
+    g_userAborted = false;
     Serial.printf("WiFi: %s ", cfgSSID.c_str());
     WiFi.mode(WIFI_STA);
     WiFi.begin(cfgSSID.c_str(), cfgPass.c_str());
 
     unsigned long t0 = millis();
     while (WiFi.status() != WL_CONNECTED) {
+        if (checkAbort()) return false;
         if (millis() - t0 > (unsigned long)WIFI_TIMEOUT) {
             Serial.println("TIMEOUT");
             return false;
