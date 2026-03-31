@@ -1,152 +1,117 @@
-# InkSight（威锋 CZ15/CZ15LW 黑白兼容说明版）
+# InkSight（Waveshare 4.2 精简固件说明版）
 
 ## 官方网址
 **www.inksight.site**
 
-## 源码来源（醒目标注）
-**本仓库基于原项目修改而来：**  
-**https://github.com/datascale-ai/inksight**
+## 源码来源
+本仓库基于原项目修改而来：
+- 原项目：<https://github.com/datascale-ai/inksight>
+- 当前适配仓库：<https://github.com/xiaosheng123/inksight-WF>
 
-> 面向 `WFT0420CZ15LW / HFT0420CZ15 / WF0420T8PCZ15230H` 这类 4.2 寸威锋面板的实际适配说明。
+本 README 主要说明当前仓库中 **Waveshare 4.2 寸屏幕精简固件** 的使用方式与现状。
 
 ## 当前结论
+当前这份适配工作的主要结论如下：
 
-针对这类 WEIFENG / Vision Peak `CZ15/CZ15LW` 面板，当前这份适配工作的结论是：
+- 已切换到 **Waveshare 4.2 驱动后端**
+- 默认构建已去掉大部分旧的 **GxEPD2 / U8g2** 依赖
+- **ESP32-C3** 与 **ESP32-WROOM32E** 两条 4.2 寸固件线均已成功编译
+- 固件体积已明显瘦身，适合先做真机联调
+- 当前重点是先保证 **黑白稳定显示**
+- 更复杂的旧日历渲染链，后续再逐步迁回新的显示路径
 
-- 面板已成功点亮并可稳定工作在 **黑白兼容模式**。
-- InkSight 真实主流程（如 Wi‑Fi 配网页）已经可以正常显示。
-- 在当前驱动栈下，**第三色尚未成功稳定调出**，因此建议先按黑白信息屏使用。
+## 固件发布目录
+仓库内已提交的固件位于：
 
-## 推荐保留固件
+- `firmware/releases/`
 
-推荐日常保留以下两个版本：
+### ESP32-C3（4.2 寸）
 
-- `wft_cz15_final_bw.bin` — 稳定黑白兼容版
-- `wft_cz15_final_bw_no_time_partial.bin` — 稳定黑白兼容版（禁用时间区域局部刷新）
+- `firmware/releases/waveshare_c3_4in2.bin`
+- `firmware/releases/waveshare_c3_4in2_merged.bin`
 
-## 推荐硬件
+### ESP32-WROOM32E（4.2 寸）
 
-- MCU：ESP32-C3 开发板（常见 SuperMini / DevKitM-1 类）
-- 面板：4.2 寸 SPI 电子墨水屏
-- 当前适配面板家族：
-  - `WFT0420CZ15LW`
-  - `HFT0420CZ15`
-  - `WF0420T8PCZ15230H`
+- `firmware/releases/waveshare_wroom32e_4in2.bin`
+- `firmware/releases/waveshare_wroom32e_4in2_merged.bin`
 
-## 接线图（ESP32-C3 ↔ WFT0420CZ15LW）
+## 推荐烧录文件
+推荐优先使用 `*_merged.bin`：
 
-| ESP32-C3 引脚 | 墨水屏引脚 | 说明 |
-|---|---|---|
-| `3V3` | `VCC` | 屏幕供电 |
-| `GND` | `GND` | 地 |
-| `GPIO4` | `CLK / SCK` | SPI 时钟 |
-| `GPIO6` | `DIN / MOSI / SDI` | SPI 数据 |
-| `GPIO7` | `CS` | 片选 |
-| `GPIO1` | `DC` | 数据/命令切换 |
-| `GPIO2` | `RST / RES` | 屏幕复位 |
-| `GPIO10` | `BUSY` | 忙信号 |
+- `waveshare_c3_4in2_merged.bin`
+- `waveshare_wroom32e_4in2_merged.bin`
 
-### 文字版接线图
+原因：
 
-```text
-ESP32-C3                     WFT0420CZ15LW 墨水屏
----------------------------------------------------
-3V3      ------------------> VCC
-GND      ------------------> GND
-GPIO4    ------------------> CLK / SCK
-GPIO6    ------------------> DIN / MOSI / SDI
-GPIO7    ------------------> CS
-GPIO1    ------------------> DC
-GPIO2    ------------------> RST / RES
-GPIO10   ------------------> BUSY
-```
+- 已合并 bootloader / partitions / app
+- 直接从 `0x0` 烧录即可
+- 不容易因为偏移地址写错而翻车
 
-## 其它已定义引脚
+## 平台说明
 
-| 功能 | 引脚 |
-|---|---|
-| 配置按键 | `GPIO9` |
-| LED | `GPIO3` |
-| 电池检测 | `GPIO0` |
+### 1) ESP32-C3
+适用于当前已验证的 C3 接线方案。
 
-## 按键说明
+已知使用过的 4.2 寸屏幕接线为：
 
-在推荐的 ESP32-C3 开发板上，通常会有两个实体按键：
+- SCK = GPIO4
+- MOSI = GPIO6
+- CS = GPIO7
+- DC = GPIO1
+- RST = GPIO2
+- BUSY = GPIO10
 
-- **RST**：复位按键
-- **BOOT / 用户键**：功能按键（具体是否为 BOOT，以开发板设计为准）
+### 2) ESP32-WROOM32E
+WROOM32E 这条线按仓库中的板级固定引脚配置编译，适用于**带固定屏幕接口**的板卡方案。
 
-在当前 InkSight 固件配置中，功能按键使用：
+注意：
+- WROOM32E 开发板若自带屏幕接口，应以板卡原理图、丝印、官方说明为准
+- 不建议机械照搬 C3 的杜邦线接法
 
-- **`PIN_CFG_BTN`**
-- 对 ESP32-C3 配置为：**GPIO9**
-
-### 1. RST 按键（硬件复位）
-**作用：** 直接执行硬件复位。
-
-**用法：** 短按一次，设备会立即重启。
-
-**说明：** 这是硬件级复位，不依赖固件逻辑，通常用于死机、异常状态或手动重启。
-
-### 2. 配置按键（GPIO9）
-该按键在很多 ESP32-C3 小板上通常对应 **BOOT / 用户键**，但具体请以开发板原理图或丝印为准。
-
-#### 短按
-**判定条件：**
-- 按下时间不少于 **50ms**
-- 小于 **2 秒**
-
-**作用：**
-在 **Live 模式** 和 **普通定时刷新模式** 之间切换。
-
-- **普通定时刷新模式**：按 Web 配置中的周期工作，更省电，适合日常使用。
-- **Live 模式**：保持联网并以更短周期检查更新，适合调试或频繁修改配置时使用，但功耗更高。
-
-#### 长按
-**判定条件：**
-- 长按约 **2 秒**
-
-**作用：**
-触发设备重启。不同固件版本下，可能会先显示 `Restarting`，也可能直接重启。
-
-#### 开机按住
-**动作：**
-在设备开机或按下 RST 重启后，按住该功能键不放。
-
-**作用：**
-强制进入 **配置门户（Captive Portal）** 模式。
-
-**适用场景：**
-- 更换 Wi‑Fi
-- 修改后端地址
-- 救援联网失败设备
-- 重新进入配置界面
-
-**补充：**
-如果设备尚未配置过 Wi‑Fi，开机通常会自动进入配置模式。
-
-## 供电提醒
-
-### 屏幕逻辑供电
-- 屏幕 `VCC` 接 `3V3`
-- 不要把 5V 直接灌到屏幕逻辑口
-
-### 给 ESP32 开发板供电
-- 若使用 5V 供电，请接开发板的 `5V / VIN / VBUS`
-- 若使用单节 18650，请不要直接当 5V 用，也不要直接硬接 `3V3`
-- 更稳的做法是先经过合适的稳压/升压模块后再供板
-
-## 当前适配状态
+## 当前构建状态
 
 ### 已完成
-- 威锋 `CZ15/CZ15LW` 面板已成功点亮
-- 黑白兼容显示已稳定
-- 配网页 / 主流程可正常显示
+- `wft_4in2b`（ESP32-C3）编译通过
+- `wft_4in2b_wroom32e`（ESP32-WROOM32E）编译通过
+- 默认构建已瘦身成功
+- 已将 C3 / WROOM32E bin 提交到仓库
 
-### 未完成
-- 第三色未成功稳定调出
-- 当前不建议把该面板当成熟三色屏直接使用
+### 当前默认方向
+- 先使用 **Waveshare 4.2 黑白稳定链路**
+- 先求稳，再补复杂页面渲染
 
-## 建议
+## 编译环境
+当前仓库在本地使用过的可用 PlatformIO 隔离环境为：
 
-如果您正在使用这类威锋 4.2 寸面板，请优先采用上面的两个黑白兼容固件版本，不要轻易刷入实验版颜色驱动。等未来出现更接近原厂的专用驱动资料或波形支持，再重新尝试第三色适配。
+- `.venv-pio`
+
+例如：
+
+```bash
+/root/.openclaw/workspace/.venv-pio/bin/pio run -e wft_4in2b
+/root/.openclaw/workspace/.venv-pio/bin/pio run -e wft_4in2b_wroom32e
+```
+
+## 烧录建议
+如果使用 merged 固件，通常可直接从 `0x0` 烧录。
+
+请根据自己的芯片与串口环境，选择对应烧录方式，例如：
+
+```bash
+esptool.py --chip esp32c3 --port <PORT> --baud 460800 write_flash 0x0 firmware/releases/waveshare_c3_4in2_merged.bin
+```
+
+或：
+
+```bash
+esptool.py --chip esp32 --port <PORT> --baud 460800 write_flash 0x0 firmware/releases/waveshare_wroom32e_4in2_merged.bin
+```
+
+## 说明
+这份 README 现在重点服务于：
+
+- 固件产物位置说明
+- C3 / WROOM32E 两套 4.2 寸固件区分
+- 当前 Waveshare 精简后端的实际状态说明
+
+如果后续把旧日历渲染完整迁回新链路，再继续补充更完整的功能说明。
