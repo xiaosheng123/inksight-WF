@@ -47,12 +47,13 @@ bool connectWiFi() {
         Serial.print(".");
     }
     Serial.printf(" OK  IP=%s\n", WiFi.localIP().toString().c_str());
-    ensureDeviceToken();
+    if (!ensureDeviceToken()) return false;
     if (cfgPendingPairCode.length() > 0) {
         String mac = WiFi.macAddress();
         String url = cfgServer + "/api/device/" + mac + "/claim-token";
         String body = String("{\"pair_code\":\"") + cfgPendingPairCode + "\"}";
         for (int attempt = 0; attempt < 3; attempt++) {
+            if (checkAbort()) return false;
             Serial.printf("[PAIR] POST %s (attempt %d/3)\n", url.c_str(), attempt + 1);
             WiFiClient plainClient;
             WiFiClientSecure secClient;
@@ -234,6 +235,7 @@ bool ensureDeviceToken() {
     String url = cfgServer + "/api/device/" + mac + "/token";
     delay(1200);
     for (int attempt = 0; attempt < 3; attempt++) {
+        if (checkAbort()) return false;
         Serial.printf("[TOKEN] POST %s (attempt %d/3)\n", url.c_str(), attempt + 1);
         WiFiClient plainClient;
         WiFiClientSecure secClient;
@@ -409,6 +411,7 @@ bool fetchBMP(bool nextMode, bool *isFallback) {
 
     bool useSSL = cfgServer.startsWith("https://");
     for (int attempt = 0; attempt < 2; attempt++) {
+        if (checkAbort()) return false;
         WiFiClient plainClient;
         WiFiClientSecure secClient;
         HTTPClient http;
@@ -423,6 +426,7 @@ bool fetchBMP(bool nextMode, bool *isFallback) {
         const char *headerKeys[] = {"X-Content-Fallback", "X-Refresh-Minutes"};
         http.collectHeaders(headerKeys, 2);
 
+        http.addHeader("Accept-Encoding", "identity");
         if (cfgDeviceToken.length() > 0) {
             http.addHeader("X-Device-Token", cfgDeviceToken);
         }
@@ -495,13 +499,6 @@ bool fetchBMP(bool nextMode, bool *isFallback) {
         http.end();
         Serial.printf("BMP OK  %d bytes\n", IMG_BUF_LEN);
         lastHeartbeatAt = millis();
-
-#if DEBUG_MODE
-        uint32_t checksum = 0;
-        for (int i = 0; i < IMG_BUF_LEN; i++) checksum += imgBuf[i];
-        Serial.printf("imgBuf checksum: %u\n", checksum);
-#endif
-
         return true;
     }
     return false;
@@ -516,6 +513,7 @@ bool hasPendingRemoteAction(bool *shouldExitLive) {
 
     bool useSSL = cfgServer.startsWith("https://");
     for (int attempt = 0; attempt < 2; attempt++) {
+        if (checkAbort()) return false;
         WiFiClient plainClient;
         WiFiClientSecure secClient;
         HTTPClient http;
@@ -581,6 +579,7 @@ void postConfigToBackend() {
     String url = cfgServer + "/api/config";
     bool useSSL = cfgServer.startsWith("https://");
     for (int attempt = 0; attempt < 2; attempt++) {
+        if (checkAbort()) return;
         WiFiClient plainClient;
         WiFiClientSecure secClient;
         HTTPClient http;

@@ -2,16 +2,24 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { useRouter, usePathname } from "next/navigation";
-import { Menu, X, Github, User, LogOut } from "lucide-react";
+import Image from "next/image";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
+import { Menu, X, Github, User } from "lucide-react";
 import { authHeaders, clearToken, fetchCurrentUser, onAuthChanged } from "@/lib/auth";
 import { localeFromPathname, t, withLocalePath } from "@/lib/i18n";
+import { UserDropdown } from "@/components/user-dropdown";
 
 export function Navbar() {
   const router = useRouter();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const locale = localeFromPathname(pathname || "/");
   const otherLocale = locale === "en" ? "zh" : "en";
+  const localeSwitchHref = (() => {
+    const base = withLocalePath(otherLocale, pathname || "/");
+    const qs = searchParams.toString();
+    return qs ? `${base}?${qs}` : base;
+  })();
   const navLinks = [
     { href: "/", label: t(locale, "nav.home") },
     { href: "/docs", label: t(locale, "nav.docs") },
@@ -35,7 +43,6 @@ export function Navbar() {
   }, [pathname, refreshUser]);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setHydrated(true);
   }, []);
 
@@ -53,6 +60,7 @@ export function Navbar() {
     await fetch("/api/auth/logout", { method: "POST", headers: authHeaders() });
     clearToken();
     setUsername(null);
+    router.replace(withLocalePath(locale, "/login"));
     router.refresh();
   };
 
@@ -70,11 +78,15 @@ export function Navbar() {
     <header className="sticky top-0 z-40 w-full border-b border-ink/10 bg-white/80 backdrop-blur-md">
       <nav className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
         <Link href={withLocalePath(locale, "/")} className="flex items-center gap-2 group">
-          <div className="flex h-8 w-8 items-center justify-center rounded-sm border border-ink bg-ink text-white text-xs font-bold font-serif">
-            {locale === "en" ? "I" : "墨"}
-          </div>
+          <Image 
+            src="/images/logo.png" 
+            alt="InkSight Logo" 
+            width={32} 
+            height={32} 
+            className="rounded-sm object-contain"
+          />
           <span className="text-lg font-semibold text-ink tracking-tight">
-            {locale === "en" ? "InkSight" : "墨鱼InkSight"}
+            {locale === "en" ? "InkSight" : "墨鱼"}
           </span>
         </Link>
 
@@ -98,24 +110,13 @@ export function Navbar() {
             <Github size={18} />
           </a>
           {username ? (
-            <div className="flex items-center gap-3 text-sm">
-              <Link
-                href={withLocalePath(locale, "/profile")}
-                className="flex items-center gap-1 text-ink-light hover:text-ink transition-colors"
-              >
-                <User size={14} />
-                {username}
-              </Link>
-              <button onClick={handleLogout} className="text-ink-light hover:text-ink transition-colors" title={t(locale, "nav.logout")}>
-                <LogOut size={16} />
-              </button>
-            </div>
+            <UserDropdown locale={locale} username={username} onLogout={handleLogout} />
           ) : (
             <Link href={withLocalePath(locale, "/login")} className="text-sm text-ink-light hover:text-ink transition-colors">
               {t(locale, "nav.login")}
             </Link>
           )}
-          <Link href={withLocalePath(otherLocale, pathname || "/")} className="text-sm text-ink-light hover:text-ink transition-colors">
+          <Link href={localeSwitchHref} className="text-sm text-ink-light hover:text-ink transition-colors">
             {t(locale, "nav.language")}
           </Link>
         </div>
@@ -177,7 +178,7 @@ export function Navbar() {
               </Link>
             )}
             <Link
-              href={withLocalePath(otherLocale, pathname || "/")}
+              href={localeSwitchHref}
               className="text-sm text-ink-light hover:text-ink transition-colors py-1"
               onClick={() => setMobileOpen(false)}
             >

@@ -232,10 +232,50 @@ async def mode_catalog(
             emitted.add(info.mode_id)
 
         # 3) Custom modes (dynamic)
-        for info in registry.list_modes(mac):
-            if info.source != "custom":
-                continue
-            items.append(_item_from_info(info))
+        if mac:
+            for info in registry.list_modes(mac):
+                if info.source != "custom":
+                    continue
+                items.append(_item_from_info(info))
+        elif user_id is not None:
+            # Device-free preview should only show the current user's actual
+            # saved/installed custom modes from DB, not whatever custom entries
+            # happen to remain in the global registry from other requests.
+            user_custom_modes = await get_user_custom_modes(user_id, None)
+            latest_by_mode_id: dict[str, dict] = {}
+            for mode_data in user_custom_modes:
+                mode_id = str(mode_data.get("mode_id") or "").upper().strip()
+                definition = mode_data.get("definition") or {}
+                if not mode_id or not isinstance(definition, dict):
+                    continue
+                existing = latest_by_mode_id.get(mode_id)
+                updated_at = str(mode_data.get("updated_at") or "")
+                if existing is None or updated_at > str(existing.get("updated_at") or ""):
+                    latest_by_mode_id[mode_id] = mode_data
+
+            for mode_id, mode_data in sorted(
+                latest_by_mode_id.items(),
+                key=lambda item: str(item[1].get("updated_at") or item[1].get("created_at") or ""),
+                reverse=True,
+            ):
+                definition = mode_data["definition"]
+                display_name = str(definition.get("display_name") or mode_id)
+                description = str(definition.get("description") or "")
+                settings_schema = definition.get("settings_schema") or []
+                items.append(
+                    {
+                        "mode_id": mode_id,
+                        "source": "custom",
+                        "category": "custom",
+                        "display_name": display_name,
+                        "description": description,
+                        "settings_schema": settings_schema if isinstance(settings_schema, list) else [],
+                        "i18n": {
+                            "zh": {"name": display_name, "tip": description},
+                            "en": {"name": display_name, "tip": description},
+                        },
+                    }
+                )
 
         return {"items": items}
     except Exception as e:
@@ -255,13 +295,13 @@ def _preview_payload(content: dict) -> dict:
 async def custom_mode_preview(
     body: dict,
     user_id: int = Depends(optional_user),
-    admin_auth: None = Depends(require_admin),
 ):
     mode_def = body.get("mode_def", body)
     if not mode_def.get("mode_id"):
         mode_def = dict(mode_def, mode_id="PREVIEW")
     screen_w = body.get("w", SCREEN_WIDTH)
     screen_h = body.get("h", SCREEN_HEIGHT)
+    colors = int(body.get("colors", 2))
     response_type = str(body.get("responseType", body.get("response_type", "image"))).strip().lower()
 
     # 解析 API key：优先使用用户级别配置，其次使用设备配置中的加密 key
@@ -411,6 +451,7 @@ async def custom_mode_preview(
             battery_pct=100.0,
             screen_w=screen_w,
             screen_h=screen_h,
+            colors=colors,
         )
 
         buf = io.BytesIO()

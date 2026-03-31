@@ -191,11 +191,12 @@ void startCaptivePortal() {
         String pass = sanitizeTextInput(webServer.arg("pass"), PORTAL_MAX_PASS);
         String serverUrl = sanitizeInput(webServer.arg("server"), PORTAL_MAX_URL);
 
-        Serial.printf("\n--- /save_wifi Request ---\n");
+        Serial.println("\n--- /save_wifi Request ---");
         Serial.printf("SSID: %s\n", ssid.c_str());
         Serial.printf("Server: %s\n", serverUrl.c_str());
 
         if (ssid.length() == 0) {
+            Serial.println("Error: SSID empty");
             webServer.send(200, "application/json", "{\"ok\":false,\"msg\":\"SSID empty\"}");
             return;
         }
@@ -226,7 +227,9 @@ void startCaptivePortal() {
         restartAtMillis = millis() + 12000;
         Serial.println("WiFi config saved; restart scheduled in 12s");
 
-        String response = String("{\"ok\":true,\"saved\":true,\"pair_code\":\"") + pairCode + "\",\"msg\":\"已保存配置，设备即将重启并尝试联网\"}";
+        String response = String("{\"ok\":true,\"saved\":true,\"pair_code\":\"") +
+                          pairCode +
+                          "\",\"msg\":\"已保存配置，设备即将重启并尝试联网\"}";
         webServer.send(200, "application/json", response);
     });
 
@@ -259,6 +262,7 @@ void startCaptivePortal() {
 
     // ── Route: Manual restart ───────────────────────────────
     webServer.on("/restart", HTTP_POST, []() {
+        Serial.println("\n--- /restart Request Received ---");
         webServer.send(200, "application/json", "{\"ok\":true}");
         Serial.println("Manual restart requested, restarting in 1 second...");
         delay(1000);
@@ -266,6 +270,7 @@ void startCaptivePortal() {
     });
 
     webServer.on("/reset_portal", HTTP_POST, []() {
+        Serial.println("\n--- /reset_portal Request Received ---");
         resetPortalProvisioningState();
         webServer.send(200, "application/json", "{\"ok\":true}");
         Serial.println("Portal reset requested, staying in provisioning mode");

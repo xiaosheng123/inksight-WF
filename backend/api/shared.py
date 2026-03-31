@@ -332,9 +332,11 @@ async def build_image(
     preview_city_override: Optional[str] = None,
     preview_mode_override: Optional[dict] = None,
     preview_memo_text: Optional[str] = None,
+    preview_ui_language: Optional[str] = None,
     current_user_id: Optional[int] = None,
     user_api_key: Optional[str] = None,
     intent_only: bool = False,
+    colors: int = 2,
 ):
     from core.mode_registry import get_registry
 
@@ -618,6 +620,13 @@ async def build_image(
                 config["memo_text"] = memo_clean
                 config["memoText"] = memo_clean
 
+    # 无设备预览（/preview 等）：按页面站点语言（中/英）决定 mode_language。
+    # 设备配置页预览（有 mac）：沿用 configs 中保存的 mode_language，不被 ui_language 覆盖。
+    if not mac and preview_ui_language in ("zh", "en"):
+        config = copy.deepcopy(config or {})
+        config["mode_language"] = preview_ui_language
+        config["modeLanguage"] = preview_ui_language
+
     cache_hit = False
     quota_exhausted = False
     billing_enabled = os.getenv("INKSIGHT_BILLING_ENABLED", "1").strip().lower() not in (
@@ -629,7 +638,7 @@ async def build_image(
 
     if mac and config and is_mode_cacheable and not skip_cache:
         if not intent_only:
-            await content_cache.check_and_regenerate_all(mac, config, v, screen_w, screen_h)
+            await content_cache.check_and_regenerate_all(mac, config, v, screen_w, screen_h, colors=colors)
         cached_img = await content_cache.get(
             mac,
             persona,
@@ -856,6 +865,7 @@ async def build_image(
             screen_w=screen_w,
             screen_h=screen_h,
             mac=mac or "",
+            colors=colors,
         )
         if isinstance(content_data, dict):
             logger.debug(

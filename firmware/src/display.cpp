@@ -139,61 +139,50 @@ static int textWidth(int charCount, int scale) {
     return charCount * (5 * scale + scale) - scale;
 }
 
+static void fillRect(int x, int y, int w, int h) {
+    int rowBytes = W / 8;
+    for (int py = y; py < y + h; py++) {
+        if (py < 0 || py >= H) continue;
+        for (int px = x; px < x + w; px++) {
+            if (px < 0 || px >= W) continue;
+            imgBuf[py * rowBytes + px / 8] &= ~(0x80 >> (px % 8));
+        }
+    }
+}
+
 // ── Show WiFi setup screen ──────────────────────────────────
 
 void showSetupScreen(const char *apName) {
     memset(imgBuf, 0xFF, IMG_BUF_LEN);
-    static uint8_t blackBufSetup[IMG_BUF_LEN];
-    memset(blackBufSetup, 0xFF, IMG_BUF_LEN);
 
-    auto drawTextToBuf = [](uint8_t *buf, const char *msg, int x, int y, int scale) {
-        int rowBytes = W / 8;
-        int len = strlen(msg);
-        for (int ci = 0; ci < len; ci++) {
-            const uint8_t *glyph = getGlyph(msg[ci]);
-            int cx = x + ci * (5 * scale + scale);
-            for (int col = 0; col < 5; col++) {
-                for (int row = 0; row < 7; row++) {
-                    if (glyph[col] & (1 << row)) {
-                        for (int dy = 0; dy < scale; dy++) {
-                            for (int dx = 0; dx < scale; dx++) {
-                                int px = cx + col * scale + dx;
-                                int py = y + row * scale + dy;
-                                if (px >= 0 && px < W && py >= 0 && py < H)
-                                    buf[py * rowBytes + px / 8] &= ~(0x80 >> (px % 8));
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    };
-
-    // Adaptive text scale based on screen height
-    int titleScale = (H < 200) ? 2 : 3;
-    int bodyScale  = (H < 200) ? 1 : 2;
-
-    int titleY = H * 13 / 100;
-    int line1Y = H * 37 / 100;
-    int apY    = H * 48 / 100;
-    int line3Y = H * 67 / 100;
+    int titleScale = 3;
+    int bodyScale  = 2;
 
     const char *title = "Setup WiFi";
-    int titleX = (W - textWidth(strlen(title), titleScale)) / 2;
-    drawTextToBuf(blackBufSetup, title, titleX, titleY, titleScale); // title on black plane
-
     const char *line1 = "Connect phone to";
-    int line1X = (W - textWidth(strlen(line1), bodyScale)) / 2;
-    drawText(line1, line1X, line1Y, bodyScale);
-
-    int apX = (W - textWidth(strlen(apName), titleScale)) / 2;
-    drawText(apName, apX, apY, titleScale);
-
     const char *line3 = "Open browser";
+
+    int titleY = 36;
+    int line1Y = 110;
+    int apY    = 155;
+    int line3Y = 220;
+
+    int titleX = (W - textWidth(strlen(title), titleScale)) / 2;
+    int line1X = (W - textWidth(strlen(line1), bodyScale)) / 2;
+    int apX    = (W - textWidth(strlen(apName), titleScale)) / 2;
     int line3X = (W - textWidth(strlen(line3), bodyScale)) / 2;
+
+    if (titleX < 4) titleX = 4;
+    if (line1X < 4) line1X = 4;
+    if (apX < 4) apX = 4;
+    if (line3X < 4) line3X = 4;
+
+    drawText(title, titleX, titleY, titleScale);
+    drawText(line1, line1X, line1Y, bodyScale);
+    drawText(apName, apX, apY, titleScale);
     drawText(line3, line3X, line3Y, bodyScale);
 
-    epdDisplayDual(blackBufSetup, imgBuf);
+    epdDisplay(imgBuf);
     Serial.printf("Setup screen shown: %s\n", apName);
 }
 

@@ -14,7 +14,7 @@
 #include "screen_ink.h"
 #include "weather.h"
 
-// ── Shared framebuffer (referenced by other modules via extern) ──
+// ── Shared framebuffers (referenced by other modules via extern) ──
 uint8_t imgBuf[IMG_BUF_LEN];
 
 // jcalendar compatibility globals
@@ -80,43 +80,6 @@ static void handleFailure(const char *reason);
 static void enterDeepSleep(int minutes);
 static void enterPortalMode();
 static void ledFeedback(const char *pattern);
-static void drawBootTestPattern();
-
-
-static void drawBootTestPattern() {
-    Serial.println("[DBG] drawBootTestPattern: begin");
-    memset(imgBuf, 0xFF, IMG_BUF_LEN);
-    int rowBytes = W / 8;
-    auto setBlack = [&](int x, int y) {
-        if (x < 0 || x >= W || y < 0 || y >= H) return;
-        imgBuf[y * rowBytes + x / 8] &= ~(0x80 >> (x % 8));
-    };
-    // border
-    for (int x = 8; x < W - 8; ++x) {
-        setBlack(x, 8);
-        setBlack(x, H - 9);
-    }
-    for (int y = 8; y < H - 8; ++y) {
-        setBlack(8, y);
-        setBlack(W - 9, y);
-    }
-    // cross lines
-    for (int i = 20; i < ((W < H) ? W : H) - 20; ++i) {
-        setBlack(i, i / 2);
-        int y = H - 1 - i / 2;
-        if (y >= 0 && y < H) setBlack(i, y);
-    }
-    // corner blocks
-    for (int y = 20; y < 50; ++y) {
-        for (int x = 20; x < 80; ++x) setBlack(x, y);
-    }
-    for (int y = H - 50; y < H - 20; ++y) {
-        for (int x = W - 80; x < W - 20; ++x) setBlack(x, y);
-    }
-    Serial.println("[DBG] drawBootTestPattern: epdDisplay");
-    epdDisplay(imgBuf);
-    Serial.println("[DBG] drawBootTestPattern: done");
-}
 
 // ── LED feedback ────────────────────────────────────────────
 
@@ -187,30 +150,24 @@ void setup() {
     Serial.println("\n=== InkSight ===");
 
     gpioInit();
-    Serial.println("[DBG] gpioInit ok");
     ledInit();
-    Serial.println("[DBG] ledInit ok");
-    epdInit();
-    Serial.println("[DBG] epdInit ok");
-    cacheInit();
-    Serial.println("EPD ready");
-    drawBootTestPattern();
-    delay(1500);
 
-    loadConfig();
-
-    // Only force portal if BOOT is held for a moment (avoids RST bounce triggering portal)
     bool forcePortal = false;
     if (digitalRead(PIN_CFG_BTN) == LOW) {
         delay(400);
         forcePortal = (digitalRead(PIN_CFG_BTN) == LOW);
     }
+
+    cacheInit();
+    Serial.println("EPD ready");
+
+    loadConfig();
+
     bool hasConfig   = (cfgSSID.length() > 0);
 
     if (forcePortal || !hasConfig) {
         Serial.println(forcePortal ? "Config button held -> portal"
                                    : "No WiFi config -> portal");
-
         enterPortalMode();
         return;
     }
@@ -619,9 +576,24 @@ static bool waitForContentReady() {
     for (int i = 0; i < maxRetries; i++) {
         Serial.printf("[BOOT] Content not ready, retry %d/%d\n", i + 1, maxRetries);
         showError("Generating...");
-        delay(waitMs);
+        unsigned long t0 = millis();
+        while (millis() - t0 < (unsigned long)waitMs) {
+            if (digitalRead(PIN_CFG_BTN) == LOW) {
+                delay(400);
+                if (digitalRead(PIN_CFG_BTN) == LOW) {
+                    Serial.println("[BOOT] Config button held during wait -> portal");
+                    enterPortalMode();
+                    return false;
+                }
+            }
+            delay(50);
+        }
         if (WiFi.status() != WL_CONNECTED) {
             if (!connectWiFi()) {
+                if (g_userAborted) {
+                    enterPortalMode();
+                    return false;
+                }
                 continue;
             }
         }
@@ -630,6 +602,10 @@ static bool waitForContentReady() {
         if (fetchBMP(false, &gotFallback) && !gotFallback) {
             Serial.println("[BOOT] Content is ready");
             return true;
+        }
+        if (g_userAborted) {
+            enterPortalMode();
+            return false;
         }
     }
     return false;
@@ -657,9 +633,6 @@ static void checkConfigButton() {
             unsigned long holdTime = millis() - ctx.btnPressStart;
             if (holdTime >= (unsigned long)CFG_BTN_HOLD_MS) {
                 Serial.printf("Config button held for %dms, restarting...\n", CFG_BTN_HOLD_MS);
-                ledFeedback("ack");
-                showError("Restarting");
-                delay(1000);
                 ESP.restart();
             }
         }

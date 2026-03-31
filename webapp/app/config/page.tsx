@@ -7,6 +7,8 @@ import { DeviceInfo } from "@/components/config/device-info";
 import { LocationPicker } from "@/components/config/location-picker";
 import { ModeSelector } from "@/components/config/mode-selector";
 import { EInkPreviewPanel } from "@/components/config/eink-preview-panel";
+import { CalendarReminders } from "@/components/config/calendar-reminders";
+import { TimetableEditor, type TimetableData } from "@/components/config/timetable-editor";
 import { RefreshStrategyEditor } from "@/components/config/refresh-strategy-editor";
 import { Field, StatCard } from "@/components/config/shared";
 import { Button } from "@/components/ui/button";
@@ -84,10 +86,9 @@ const STRATEGIES: Record<string, string> = {
   smart: "根据时间段自动匹配最佳模式",
 };
 
-const LANGUAGE_OPTIONS = [
-  { value: "zh", label: "中文为主" },
-  { value: "en", label: "英文为主" },
-  { value: "mixed", label: "中英混合" },
+const MODE_LANGUAGE_OPTIONS = [
+  { value: "zh", label: "中文", labelEn: "Chinese" },
+  { value: "en", label: "English", labelEn: "English" },
 ] as const;
 
 const TONE_OPTIONS = [
@@ -127,13 +128,6 @@ export async function queueImmediateRefreshIfOnline(
   } catch {
     return { onlineNow: null, lastSeen: null, refreshQueued: false };
   }
-}
-
-function normalizeLanguage(v: unknown): string {
-  if (typeof v !== "string") return "zh";
-  if (v === "zh" || v === "en" || v === "mixed") return v;
-  const found = LANGUAGE_OPTIONS.find((x) => x.label === v);
-  return found?.value || "zh";
 }
 
 function normalizeTone(v: unknown): string {
@@ -210,7 +204,7 @@ interface PendingPreviewConfirm {
   usageSource?: string;
 }
 
-type ParamModalType = "quote" | "weather" | "memo" | "countdown" | "habit" | "lifebar";
+type ParamModalType = "quote" | "weather" | "memo" | "countdown" | "habit" | "lifebar" | "calendar" | "timetable";
 interface ParamModalState {
   type: ParamModalType;
   mode: string;
@@ -500,7 +494,7 @@ function ConfigPageInner() {
   const [refreshMin, setRefreshMin] = useState(60);
   const [city, setCity] = useState("");
   const [locationMeta, setLocationMeta] = useState<LocationValue>({});
-  const [language, setLanguage] = useState("zh");
+  const [modeLanguage, setModeLanguage] = useState("zh");
   const [contentTone, setContentTone] = useState("neutral");
   const [characterTones, setCharacterTones] = useState<string[]>([]);
   const [customPersonaTone, setCustomPersonaTone] = useState("");
@@ -518,6 +512,7 @@ function ConfigPageInner() {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewStatusText, setPreviewStatusText] = useState("");
   const [previewMode, setPreviewMode] = useState("");
+  const [previewColors, setPreviewColors] = useState(2);
   const [previewNoCacheOnce, setPreviewNoCacheOnce] = useState(false);
   const [previewCacheHit, setPreviewCacheHit] = useState<boolean | null>(null);
   const [previewLlmStatus, setPreviewLlmStatus] = useState<string | null>(null);
@@ -534,15 +529,34 @@ function ConfigPageInner() {
   const [authorDraft, setAuthorDraft] = useState("");
   const [weatherDraftLocation, setWeatherDraftLocation] = useState<LocationValue>({});
   const [memoDraft, setMemoDraft] = useState("");
-  const [countdownName, setCountdownName] = useState("元旦");
+  const [countdownName, setCountdownName] = useState(isEn ? "New Year" : "元旦");
   const [countdownDate, setCountdownDate] = useState("2027-01-01");
-  const [habitItems, setHabitItems] = useState([
-    { name: "早起", done: false },
-    { name: "运动", done: false },
-    { name: "阅读", done: false },
-  ]);
+  const [habitItems, setHabitItems] = useState(
+    isEn
+      ? [{ name: "Wake up early", done: false }, { name: "Exercise", done: false }, { name: "Read", done: false }]
+      : [{ name: "早起", done: false }, { name: "运动", done: false }, { name: "阅读", done: false }],
+  );
   const [userAge, setUserAge] = useState(30);
   const [lifeExpectancy, setLifeExpectancy] = useState<100 | 120>(100);
+  const [timetableData, setTimetableData] = useState<TimetableData>({
+    style: "weekly",
+    periods: ["08:00-09:30", "10:00-11:30", "14:00-15:30", "16:00-17:30"],
+    courses: isEn
+      ? {
+          "0-0": "Calculus/A201", "0-2": "Linear Algebra/A201",
+          "1-1": "English/B305", "1-3": "PE/Gym",
+          "2-0": "Data Struct/C102", "2-2": "Networks/C102",
+          "3-1": "Probability/A201", "3-3": "Politics/D405",
+          "4-0": "OS/C102",
+        }
+      : {
+          "0-0": "高等数学/A201", "0-2": "线性代数/A201",
+          "1-1": "大学英语/B305", "1-3": "体育/操场",
+          "2-0": "数据结构/C102", "2-2": "计算机网络/C102",
+          "3-1": "概率论/A201", "3-3": "毛概/D405",
+          "4-0": "操作系统/C102",
+        },
+  });
   // 邀请码弹窗状态
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [inviteCode, setInviteCode] = useState("");
@@ -713,7 +727,7 @@ function ConfigPageInner() {
         if (cfg.refreshStrategy || cfg.refresh_strategy) setStrategy((cfg.refreshStrategy || cfg.refresh_strategy) as string);
         if (cfg.refreshInterval || cfg.refresh_minutes) setRefreshMin((cfg.refreshInterval || cfg.refresh_minutes) as number);
         applyGlobalLocation(extractLocationValue(cfg as Record<string, unknown>));
-        if (cfg.language) setLanguage(normalizeLanguage(cfg.language));
+        setModeLanguage((cfg as Record<string, unknown>).modeLanguage as string || (cfg as Record<string, unknown>).mode_language as string || "zh");
         if (cfg.contentTone || cfg.content_tone) setContentTone(normalizeTone(cfg.contentTone || cfg.content_tone));
         if (cfg.characterTones || cfg.character_tones) setCharacterTones((cfg.characterTones || cfg.character_tones) as string[]);
         if (cfg.mode_overrides) setModeOverrides(cfg.mode_overrides);
@@ -791,7 +805,7 @@ function ConfigPageInner() {
 
   const requiresParamModal = useCallback((modeId: string) => {
     const m = (modeId || "").toUpperCase();
-    return m === "WEATHER" || m === "MEMO" || m === "MY_QUOTE" || m === "COUNTDOWN" || m === "HABIT" || m === "LIFEBAR";
+    return m === "WEATHER" || m === "MEMO" || m === "MY_QUOTE" || m === "COUNTDOWN" || m === "HABIT" || m === "LIFEBAR" || m === "CALENDAR" || m === "TIMETABLE";
   }, []);
 
   const openParamModal = useCallback((modeId: string, action: "preview" | "apply") => {
@@ -818,11 +832,32 @@ function ConfigPageInner() {
       return;
     }
     if (m === "HABIT") {
+      const savedOv = modeOverrides["HABIT"] || {};
+      const savedItems = Array.isArray(savedOv.habitItems) ? (savedOv.habitItems as Array<{ name: string; done?: boolean }>) : null;
+      if (savedItems && savedItems.length > 0) {
+        setHabitItems(savedItems.map((h) => ({ name: h.name, done: h.done ?? false })));
+      }
       setParamModal({ type: "habit", mode: m, action });
       return;
     }
     if (m === "LIFEBAR") {
       setParamModal({ type: "lifebar", mode: m, action });
+      return;
+    }
+    if (m === "CALENDAR") {
+      setParamModal({ type: "calendar", mode: m, action });
+      return;
+    }
+    if (m === "TIMETABLE") {
+      const existing = (modeOverrides[m] || {}) as Record<string, unknown>;
+      if (existing.periods && existing.courses) {
+        setTimetableData({
+          style: (existing.style as "daily" | "weekly") || "daily",
+          periods: existing.periods as string[],
+          courses: existing.courses as Record<string, string>,
+        });
+      }
+      setParamModal({ type: "timetable", mode: m, action });
       return;
     }
   }, [memoText, modeOverrides]);
@@ -896,7 +931,7 @@ function ConfigPageInner() {
         refreshStrategy: strategy,
         refreshInterval: refreshMin,
         ...currentLocation,
-        language,
+        modeLanguage,
         contentTone,
         characterTones: characterTones,
         modeOverrides: normalizedModeOverrides,
@@ -936,6 +971,48 @@ function ConfigPageInner() {
     }
   };
 
+  const [savingPrefs, setSavingPrefs] = useState(false);
+  const handleSavePreferences = async () => {
+    if (!mac) { showToast(tr("请先完成刷机和配网以获取设备 MAC", "Please flash and provision to get device MAC"), "error"); return; }
+    if (macAccessDenied) { showToast(tr("你无权配置该设备", "No permission"), "error"); return; }
+    setSavingPrefs(true);
+    try {
+      const normalizedModeOverrides = Object.fromEntries(
+        Object.entries(modeOverrides)
+          .map(([modeId, ov]) => {
+            const cleaned = sanitizeModeOverride(ov);
+            return [modeId.toUpperCase(), cleaned] as const;
+          })
+          .filter(([, ov]) => Object.keys(ov).length > 0)
+      );
+      const body: Record<string, unknown> = {
+        mac,
+        modes: Array.from(selectedModes),
+        refreshStrategy: strategy,
+        refreshInterval: refreshMin,
+        ...currentLocation,
+        modeLanguage,
+        contentTone,
+        characterTones: characterTones,
+        modeOverrides: normalizedModeOverrides,
+        memoText: memoText,
+        is_focus_listening: isFocusListening,
+      };
+      const res = await fetch("/api/config", {
+        method: "POST",
+        headers: authHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error("Save failed");
+      showToast(tr("配置已保存", "Settings saved"), "success");
+      setPreviewNoCacheOnce(true);
+    } catch {
+      showToast(tr("保存失败", "Save failed"), "error");
+    } finally {
+      setSavingPrefs(false);
+    }
+  };
+
   const handleToggleFocusListening = useCallback(async () => {
     if (!mac) return;
     const next = !isFocusListening;
@@ -966,7 +1043,7 @@ function ConfigPageInner() {
     } finally {
       setFocusToggleLoading(false);
     }
-  }, [authHeaders, isFocusListening, mac, showToast]);
+  }, [isFocusListening, mac, showToast]);
 
   const buildPreviewParams = useCallback((mode?: string, forceNoCache = false, forcedModeOverride?: ModeOverride) => {
     const m = mode || previewMode;
@@ -1015,9 +1092,10 @@ function ConfigPageInner() {
       }
     }
     if (locationChanged && effectiveLocation.city) params.set("city_override", effectiveLocation.city);
+    if (previewColors > 2) params.set("colors", String(previewColors));
     if (forceFresh || locationChanged || hasModeOverride) params.set("no_cache", "1");
     return { m, params, consumeNoCacheOnce };
-  }, [config, currentLocation, mac, memoText, modeOverrides, previewMode, previewNoCacheOnce, sanitizeModeOverride]);
+  }, [config, currentLocation, mac, memoText, modeOverrides, previewColors, previewMode, previewNoCacheOnce, sanitizeModeOverride]);
 
   const ownerUsername = useMemo(
     () => deviceMembers.find((member) => member.role === "owner")?.username || "",
@@ -1405,7 +1483,7 @@ function ConfigPageInner() {
       const res = await fetch("/api/modes/preview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode_def: def, mac: mac || undefined }),
+        body: JSON.stringify({ mode_def: def, mac: mac || undefined, colors: previewColors }),
       });
 
       // 额度不足：返回 402
@@ -1694,12 +1772,18 @@ function ConfigPageInner() {
       Object.fromEntries(
         catalogItems
           .filter((m) => m.category === "custom")
-          .map((m) => [
-            m.mode_id.toUpperCase(),
-            { name: m.display_name || m.mode_id, tip: m.description || "" },
-          ]),
+          .map((m) => {
+            const lang = isEn ? m.i18n?.en : m.i18n?.zh;
+            return [
+              m.mode_id.toUpperCase(),
+              {
+                name: (lang?.name && String(lang.name)) || m.display_name || m.mode_id,
+                tip: (lang?.tip && String(lang.tip)) || m.description || "",
+              },
+            ];
+          }),
       ),
-    [catalogItems],
+    [catalogItems, isEn],
   );
   const activeModeSchema = settingsMode ? (modeSchemaMap[settingsMode] || []) : [];
 
@@ -2039,6 +2123,8 @@ function ConfigPageInner() {
                     setCustomDesc={setCustomDesc}
                     setCustomModeName={setCustomModeName}
                     setCustomJson={setCustomJson}
+                    previewColors={previewColors}
+                    onColorsChange={setPreviewColors}
                   />
 
                   <div ref={previewPanelRef}>
@@ -2156,29 +2242,40 @@ function ConfigPageInner() {
 
             {/* Preferences Tab */}
             {activeTab === "preferences" && (
-              <RefreshStrategyEditor
-                tr={tr}
-                locale={isEn ? "en" : "zh"}
-                location={currentLocation}
-                setLocation={applyGlobalLocation}
-                language={language}
-                setLanguage={setLanguage}
-                contentTone={contentTone}
-                setContentTone={setContentTone}
-                characterTones={characterTones}
-                setCharacterTones={setCharacterTones}
-                customPersonaTone={customPersonaTone}
-                setCustomPersonaTone={setCustomPersonaTone}
-                handleAddCustomPersona={handleAddCustomPersona}
-                strategy={strategy}
-                setStrategy={setStrategy}
-                refreshMin={refreshMin}
-                setRefreshMin={setRefreshMin}
-                languageOptions={LANGUAGE_OPTIONS}
-                toneOptions={TONE_OPTIONS}
-                personaPresets={PERSONA_PRESETS}
-                strategies={STRATEGIES}
-              />
+              <div className="space-y-4">
+                <RefreshStrategyEditor
+                  tr={tr}
+                  locale={isEn ? "en" : "zh"}
+                  location={currentLocation}
+                  setLocation={applyGlobalLocation}
+                  modeLanguage={modeLanguage}
+                  setModeLanguage={setModeLanguage}
+                  modeLanguageOptions={MODE_LANGUAGE_OPTIONS}
+                  contentTone={contentTone}
+                  setContentTone={setContentTone}
+                  characterTones={characterTones}
+                  setCharacterTones={setCharacterTones}
+                  customPersonaTone={customPersonaTone}
+                  setCustomPersonaTone={setCustomPersonaTone}
+                  handleAddCustomPersona={handleAddCustomPersona}
+                  strategy={strategy}
+                  setStrategy={setStrategy}
+                  refreshMin={refreshMin}
+                  setRefreshMin={setRefreshMin}
+                  toneOptions={TONE_OPTIONS}
+                  personaPresets={PERSONA_PRESETS}
+                  strategies={STRATEGIES}
+                />
+                <Button
+                  variant="outline"
+                  onClick={handleSavePreferences}
+                  disabled={!mac || savingPrefs}
+                  className="w-full bg-white text-ink border-ink/20 hover:bg-ink hover:text-white active:bg-ink active:text-white disabled:bg-white disabled:text-ink/50"
+                >
+                  {savingPrefs ? <Loader2 size={14} className="animate-spin mr-1" /> : <Save size={14} className="mr-1" />}
+                  {tr("保存", "Save")}
+                </Button>
+              </div>
             )}
 
             {/* Sharing Tab */}
@@ -2834,6 +2931,10 @@ function ConfigPageInner() {
                   ? tr("倒计时设置", "Countdown Settings")
                   : paramModal.type === "habit"
                   ? tr("习惯打卡", "Habit Tracker")
+                  : paramModal.type === "calendar"
+                  ? tr("日历提醒", "Calendar Reminders")
+                  : paramModal.type === "timetable"
+                  ? tr("课程表设置", "Timetable Settings")
                   : tr("人生进度条", "Life Progress")}
               </div>
               <button className="text-ink-light hover:text-ink" onClick={() => setParamModal(null)}>
@@ -2863,6 +2964,7 @@ function ConfigPageInner() {
                   />
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2">
                     <Button
+                      variant="outline"
                       onClick={() => {
                         commitModalAction(paramModal.mode, paramModal.action);
                       }}
@@ -2922,6 +3024,7 @@ function ConfigPageInner() {
                         );
                       }}
                       disabled={previewLoading}
+                      variant="outline"
                     >
                       {tr("预览天气", "Preview weather")}
                     </Button>
@@ -2950,6 +3053,7 @@ function ConfigPageInner() {
                         );
                       }}
                       disabled={previewLoading}
+                      variant="outline"
                     >
                       {tr("预览便签", "Preview memo")}
                     </Button>
@@ -3009,6 +3113,7 @@ function ConfigPageInner() {
                         } as ModeOverride);
                       }}
                       disabled={previewLoading}
+                      variant="outline"
                     >
                       {tr("预览倒计时", "Preview Countdown")}
                     </Button>
@@ -3017,7 +3122,10 @@ function ConfigPageInner() {
               ) : paramModal.type === "habit" ? (
                 <>
                   <div className="text-xs text-ink-light mb-3">
-                    {tr("设置你的习惯并勾选完成情况", "Set your habits and check completion")}
+                    {tr(
+                      "管理你的习惯列表，勾选今日已完成的习惯。用 ✕ 移除不想追踪的习惯。",
+                      "Manage your habit list. Check off completed habits today. Use ✕ to remove habits you don't want to track.",
+                    )}
                   </div>
                   <div className="space-y-2 max-h-64 overflow-y-auto">
                     {habitItems.map((item, idx) => (
@@ -3044,7 +3152,7 @@ function ConfigPageInner() {
                         <button
                           onClick={() => setHabitItems(habitItems.filter((_, i) => i !== idx))}
                           className="text-ink-light hover:text-red-500 px-2"
-                          title={tr("删除", "Delete")}
+                          title={tr("移除此习惯", "Remove this habit")}
                         >
                           ✕
                         </button>
@@ -3067,19 +3175,19 @@ function ConfigPageInner() {
                     </Button>
                     <Button
                       onClick={() => {
-                        const lines = habitItems.map((h) => `${h.name} ${h.done ? "✓" : "✗"}`);
+                        const tracked = habitItems.filter((h) => h.name.trim());
                         commitModalAction(paramModal.mode, paramModal.action, {
-                          habits: habitItems,
-                          summary: lines.join("\n"),
+                          habitItems: tracked.map((h) => ({ name: h.name.trim(), done: h.done })),
                         } as ModeOverride);
                       }}
                       disabled={previewLoading}
+                      variant="outline"
                     >
                       {tr("预览打卡", "Preview Habits")}
                     </Button>
                   </div>
                 </>
-              ) : (
+              ) : paramModal.type === "lifebar" ? (
                 <>
                   <div className="text-xs text-ink-light mb-3">
                     {tr("设置你的年龄和预期寿命", "Set your age and life expectancy")}
@@ -3145,12 +3253,92 @@ function ConfigPageInner() {
                         } as ModeOverride);
                       }}
                       disabled={previewLoading}
+                      variant="outline"
                     >
                       {tr("预览进度", "Preview Progress")}
                     </Button>
                   </div>
                 </>
-              )}
+              ) : paramModal.type === "calendar" ? (
+                <>
+                  <div className="text-xs text-ink-light mb-3">
+                    {tr(
+                      "为日历中的特定日期添加提醒事项，提醒会显示在日期下方。",
+                      "Add reminders for specific dates. They appear below each date in the calendar.",
+                    )}
+                  </div>
+                  <CalendarReminders
+                    reminders={
+                      (getModeOverride("CALENDAR") as Record<string, unknown>)?.reminders as Record<string, string> ?? {}
+                    }
+                    onChange={(r) => {
+                      updateModeOverride("CALENDAR", {
+                        reminders: Object.keys(r).length > 0 ? r : undefined,
+                      } as Record<string, unknown>);
+                    }}
+                    tr={tr}
+                  />
+                  <div className="grid grid-cols-2 gap-2 pt-3">
+                    <Button
+                      onClick={() => commitModalAction(paramModal.mode, paramModal.action)}
+                      disabled={previewLoading}
+                      variant="outline"
+                    >
+                      {tr("跳过预览", "Skip Preview")}
+                    </Button>
+                    <Button
+                      onClick={() => {
+                        const reminders = (getModeOverride("CALENDAR") as Record<string, unknown>)?.reminders as Record<string, string> | undefined;
+                        commitModalAction(paramModal.mode, paramModal.action,
+                          reminders && Object.keys(reminders).length > 0
+                            ? { reminders } as ModeOverride
+                            : undefined,
+                        );
+                      }}
+                      disabled={previewLoading}
+                      variant="outline"
+                    >
+                      {tr("预览日历", "Preview Calendar")}
+                    </Button>
+                  </div>
+                </>
+              ) : paramModal.type === "timetable" ? (
+                <>
+                  <div className="text-xs text-ink-light mb-3">
+                    {tr(
+                      "选择课表类型并编辑课程安排，点击单元格即可修改。",
+                      "Choose timetable type and edit courses. Click any cell to modify.",
+                    )}
+                  </div>
+                  <TimetableEditor
+                    data={timetableData}
+                    onChange={setTimetableData}
+                    tr={tr}
+                  />
+                  <div className="grid grid-cols-2 gap-2 pt-3">
+                    <Button
+                      onClick={() => commitModalAction(paramModal.mode, paramModal.action)}
+                      disabled={previewLoading}
+                      variant="outline"
+                    >
+                      {tr("使用默认", "Use Default")}
+                    </Button>
+                    <Button
+                      onClick={() => {
+                        commitModalAction(paramModal.mode, paramModal.action, {
+                          style: timetableData.style,
+                          periods: timetableData.periods,
+                          courses: timetableData.courses,
+                        } as ModeOverride);
+                      }}
+                      disabled={previewLoading}
+                      variant="outline"
+                    >
+                      {tr("预览课程表", "Preview Timetable")}
+                    </Button>
+                  </div>
+                </>
+              ) : null}
             </div>
           </div>
         </div>

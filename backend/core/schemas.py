@@ -52,7 +52,8 @@ class ConfigRequest(BaseModel):
     refreshInterval: int = Field(
         default=60, ge=10, le=1440, description="刷新间隔(分钟), 10~1440"
     )
-    language: str = Field(default="zh", description="语言: zh / en / mixed")
+    language: str = Field(default="zh", description="(deprecated) 语言偏好，已被 modeLanguage 取代")
+    modeLanguage: str = Field(default="zh", description="模式内容语言: zh / en")
     contentTone: str = Field(default="neutral", description="调性: positive / neutral / deep / humor")
     city: str = Field(default="杭州", max_length=40, description="城市名称")
     latitude: Optional[float] = Field(default=None, ge=-90, le=90, description="地点纬度")
@@ -249,6 +250,7 @@ class RenderQuery(BaseModel):
     w: int = Field(default=400, ge=100, le=1600, description="Screen width in pixels")
     h: int = Field(default=300, ge=100, le=1200, description="Screen height in pixels")
     next_mode: Optional[int] = Field(default=None, alias="next", description="1 = advance to next mode")
+    colors: int = Field(default=2, ge=2, le=4, description="Device color capability (2=BW, 3=BWR, 4=BWRY)")
 
     @field_validator("mac")
     @classmethod
