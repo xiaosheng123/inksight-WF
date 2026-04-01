@@ -14,12 +14,13 @@
 #define PIN_CFG_BTN    9
 #define PIN_LED        3
 #elif defined(BOARD_PROFILE_ESP32_WROOM32E)
-#define PIN_EPD_MOSI   14
-#define PIN_EPD_SCK    13
-#define PIN_EPD_CS     15
-#define PIN_EPD_DC     27
-#define PIN_EPD_RST    26
-#define PIN_EPD_BUSY   25
+// Align WROOM32E EPD pins to the official driver board mapping from Taobao
+#define PIN_EPD_MOSI   12
+#define PIN_EPD_SCK    15
+#define PIN_EPD_CS     16
+#define PIN_EPD_DC     11
+#define PIN_EPD_RST    10
+#define PIN_EPD_BUSY   9
 #define PIN_BAT_ADC    35
 #define PIN_CFG_BTN    0
 #define PIN_LED        2
